@@ -523,6 +523,7 @@ class BadrikRunner {
         this.playAnimation('run');
         this.spawnInitialObjects();
         this.updateHUD();
+        this.sound.startMusic(); // Restart music on play again
     }
     
     backToMenu() {
@@ -885,8 +886,10 @@ class BadrikRunner {
     gameOver() {
         this.isPlaying = false;
         this.isGameOver = true;
-        this.sound.play('crash');
-        this.sound.stopMusic(); // Stop music on game over
+        this.sound.stopMusic(); // Stop music first
+        
+        // Play crash with slight delay so it's audible
+        setTimeout(() => this.sound.play('crash'), 50);
         
         if (this.score > this.bestScore) {
             this.bestScore = this.score;
