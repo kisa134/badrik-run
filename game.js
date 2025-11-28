@@ -328,10 +328,27 @@ class Game {
                 gltf.animations.forEach(clip => {
                     this.menuAnimations[clip.name.toLowerCase()] = this.menuMixer.clipAction(clip);
                 });
-                const sitAnim = this.menuAnimations['sit'] || Object.values(this.menuAnimations)[0];
-                if (sitAnim) sitAnim.play();
+                // Start with sit animation
+                this.menuCurrentAnim = this.menuAnimations['sit'] || Object.values(this.menuAnimations)[0];
+                if (this.menuCurrentAnim) this.menuCurrentAnim.play();
+                
+                // Scratch every 3 seconds
+                this.lastScratchTime = Date.now();
+                this.scratchInterval = 3000;
+                this.scratchDuration = 2000;
+                this.isScratching = false;
             }
         });
+    }
+    
+    playMenuAnimation(name) {
+        const anim = this.menuAnimations[name] || 
+                     this.menuAnimations[Object.keys(this.menuAnimations).find(k => k.includes(name))];
+        if (anim && this.menuCurrentAnim !== anim) {
+            if (this.menuCurrentAnim) this.menuCurrentAnim.fadeOut(0.3);
+            anim.reset().fadeIn(0.3).play();
+            this.menuCurrentAnim = anim;
+        }
     }
     
     animateMenu() {
@@ -340,6 +357,19 @@ class Game {
         
         const delta = this.clock.getDelta();
         if (this.menuMixer) this.menuMixer.update(delta);
+        
+        // Scratch logic: every 3 sec scratch for 2 sec, then back to sit
+        const now = Date.now();
+        if (!this.isScratching && now - this.lastScratchTime > this.scratchInterval) {
+            this.playMenuAnimation('scratch');
+            this.isScratching = true;
+            this.scratchStartTime = now;
+        }
+        if (this.isScratching && now - this.scratchStartTime > this.scratchDuration) {
+            this.playMenuAnimation('sit');
+            this.isScratching = false;
+            this.lastScratchTime = now;
+        }
         
         // Gentle rotation
         if (this.menuDog) {
@@ -643,7 +673,7 @@ class Game {
         if (!this.isJumping && !this.isSliding) {
             this.isJumping = true;
             this.velocityY = CONFIG.JUMP_FORCE;
-            this.playAnimation('jump');
+            // Keep running animation during jump
             this.sound.play('jump');
         }
     }
@@ -652,9 +682,8 @@ class Game {
         if (!this.isJumping && !this.isSliding) {
             this.isSliding = true;
             this.slideTimer = CONFIG.SLIDE_DURATION;
-            if (this.dog) {
-                this.dog.scale.y = CONFIG.DOG_SCALE * 0.4;
-            }
+            // Play lay animation instead of squashing
+            this.playAnimation('lay');
             this.sound.play('slide');
         }
     }
@@ -808,7 +837,6 @@ class Game {
             this.slideTimer -= delta * 1000;
             if (this.slideTimer <= 0) {
                 this.isSliding = false;
-                this.dog.scale.y = CONFIG.DOG_SCALE;
                 this.playAnimation('run');
             }
         }
