@@ -303,14 +303,20 @@ class Game {
     }
     
     loadMenuDog() {
-        // Load texture
+        // Load textures with correct colorspace
         const textureLoader = new THREE.TextureLoader();
-        this.dogTextures = {
-            fawn: textureLoader.load('frenchbulldog.texture.fawn.001.png'),
-            white: textureLoader.load('frenchbulldog.texture.white.001.png'),
-            black: textureLoader.load('frenchbulldog.texture.blackpied.001.png')
+        this.dogTextures = {};
+        const texPaths = {
+            fawn: 'frenchbulldog.texture.fawn.001.png',
+            white: 'frenchbulldog.texture.white.001.png',
+            black: 'frenchbulldog.texture.blackpied.001.png'
         };
-        Object.values(this.dogTextures).forEach(t => t.flipY = false);
+        for (const [name, path] of Object.entries(texPaths)) {
+            const tex = textureLoader.load(path);
+            tex.flipY = false;
+            tex.colorSpace = THREE.SRGBColorSpace;
+            this.dogTextures[name] = tex;
+        }
         this.currentSkin = 'fawn';
         
         this.loader.load('bulldog.glb', (gltf) => {
@@ -319,16 +325,7 @@ class Game {
             this.menuDog.position.set(0, -0.3, 0);
             
             // Apply texture
-            this.menuDog.traverse(child => {
-                if (child.isMesh) {
-                    child.material = new THREE.MeshStandardMaterial({
-                        map: this.dogTextures[this.currentSkin],
-                        roughness: 0.6,
-                        metalness: 0.1
-                    });
-                }
-            });
-            
+            this.applyDogTexture(this.menuDog, this.currentSkin);
             this.menuScene.add(this.menuDog);
             
             // Animations
@@ -336,18 +333,34 @@ class Game {
                 this.menuAnimations = {};
                 this.menuMixer = new THREE.AnimationMixer(this.menuDog);
                 gltf.animations.forEach(clip => {
-                    console.log('Menu animation found:', clip.name);
-                    this.menuAnimations[clip.name.toLowerCase()] = this.menuMixer.clipAction(clip);
+                    console.log('Anim:', clip.name);
+                    this.menuAnimations[clip.name] = this.menuMixer.clipAction(clip);
                 });
-                // Start with sit animation
-                this.menuCurrentAnim = this.menuAnimations['sit'] || Object.values(this.menuAnimations)[0];
-                if (this.menuCurrentAnim) this.menuCurrentAnim.play();
                 
-                // Scratch every 3 seconds
+                // Start with sit animation
+                const sitAnim = this.menuAnimations['sit_A_0'] || this.menuAnimations['idle_A_0'];
+                if (sitAnim) {
+                    sitAnim.play();
+                    this.menuCurrentAnim = sitAnim;
+                }
+                
+                // Scratch timer
                 this.lastScratchTime = Date.now();
-                this.scratchInterval = 3000;
-                this.scratchDuration = 2000;
                 this.isScratching = false;
+            }
+        });
+    }
+    
+    applyDogTexture(model, skinName) {
+        const texture = this.dogTextures[skinName];
+        if (!texture) return;
+        model.traverse(child => {
+            if (child.isMesh) {
+                child.material = new THREE.MeshStandardMaterial({
+                    map: texture,
+                    roughness: 0.7,
+                    metalness: 0.1
+                });
             }
         });
     }
@@ -355,21 +368,13 @@ class Game {
     changeSkin(skinName) {
         if (!this.dogTextures[skinName]) return;
         this.currentSkin = skinName;
-        
-        // Update menu dog
         if (this.menuDog) {
-            this.menuDog.traverse(child => {
-                if (child.isMesh) {
-                    child.material.map = this.dogTextures[skinName];
-                    child.material.needsUpdate = true;
-                }
-            });
+            this.applyDogTexture(this.menuDog, skinName);
         }
     }
     
     playMenuAnimation(name) {
-        const anim = this.menuAnimations[name] || 
-                     this.menuAnimations[Object.keys(this.menuAnimations).find(k => k.includes(name))];
+        const anim = this.menuAnimations[name];
         if (anim && this.menuCurrentAnim !== anim) {
             if (this.menuCurrentAnim) this.menuCurrentAnim.fadeOut(0.3);
             anim.reset().fadeIn(0.3).play();
@@ -384,22 +389,24 @@ class Game {
         const delta = this.clock.getDelta();
         if (this.menuMixer) this.menuMixer.update(delta);
         
-        // Scratch logic: every 3 sec scratch for 2 sec, then back to sit
+        // Scratch every 4 sec for 3 sec
         const now = Date.now();
-        if (!this.isScratching && now - this.lastScratchTime > this.scratchInterval) {
-            this.playMenuAnimation('scratch');
-            this.isScratching = true;
-            this.scratchStartTime = now;
-        }
-        if (this.isScratching && now - this.scratchStartTime > this.scratchDuration) {
-            this.playMenuAnimation('sit');
-            this.isScratching = false;
-            this.lastScratchTime = now;
+        if (this.menuAnimations) {
+            if (!this.isScratching && now - this.lastScratchTime > 4000) {
+                this.playMenuAnimation('sit_A_itch');
+                this.isScratching = true;
+                this.scratchStartTime = now;
+            }
+            if (this.isScratching && now - this.scratchStartTime > 3000) {
+                this.playMenuAnimation('sit_A_0');
+                this.isScratching = false;
+                this.lastScratchTime = now;
+            }
         }
         
         // Gentle rotation
         if (this.menuDog) {
-            this.menuDog.rotation.y = Math.sin(Date.now() * 0.001) * 0.2;
+            this.menuDog.rotation.y = Math.sin(Date.now() * 0.001) * 0.15;
         }
         
         this.menuRenderer.render(this.menuScene, this.menuCamera);
@@ -575,10 +582,8 @@ class Game {
     
     // ==================== PLAYER ====================
     loadPlayer() {
-        // Load texture first
-        const textureLoader = new THREE.TextureLoader();
-        const texture = textureLoader.load('frenchbulldog.texture.fawn.001.png');
-        texture.flipY = false;
+        // Use texture from menu (already loaded)
+        const texture = this.dogTextures[this.currentSkin];
         
         this.loader.load('bulldog.glb', (gltf) => {
             this.dog = gltf.scene;
@@ -586,29 +591,17 @@ class Game {
             this.dog.position.set(0, CONFIG.DOG_Y, 0);
             this.dog.rotation.y = Math.PI;
             
-            // Apply texture to dog
-            this.dog.traverse(child => {
-                if (child.isMesh) {
-                    child.material = new THREE.MeshStandardMaterial({
-                        map: texture,
-                        roughness: 0.6,
-                        metalness: 0.1,
-                        transparent: false,
-                        opacity: 1.0
-                    });
-                }
-            });
-            
+            // Apply selected skin texture
+            this.applyDogTexture(this.dog, this.currentSkin);
             this.scene.add(this.dog);
             
             // Animations
             if (gltf.animations.length > 0) {
                 this.mixer = new THREE.AnimationMixer(this.dog);
                 gltf.animations.forEach(clip => {
-                    const name = clip.name.toLowerCase();
-                    this.animations[name] = this.mixer.clipAction(clip);
+                    this.animations[clip.name] = this.mixer.clipAction(clip);
                 });
-                this.playAnimation('run');
+                this.playAnimation('run_A_0');
             }
         });
     }
