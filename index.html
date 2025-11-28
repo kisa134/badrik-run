@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>🐕 BADRIK RUN — Earn $BADRIK Tokens!</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Russo+One&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- МЕНЮ -->
+    <div id="menu" class="menu">
+        <canvas id="menuCanvas"></canvas>
+        
+        <div class="menu-ui">
+            <div class="logo">
+                <h1>🐕 BADRIK RUN</h1>
+                <p class="tagline">Run. Collect. Earn $BADRIK!</p>
+            </div>
+            
+            <div class="wallet-section">
+                <button id="connectWallet" class="wallet-btn">
+                    <span class="wallet-icon">👛</span>
+                    Connect Phantom
+                </button>
+                <div id="walletInfo" class="wallet-info" style="display: none;">
+                    <span class="wallet-address"></span>
+                    <span class="wallet-status">✓ Connected</span>
+                </div>
+            </div>
+            
+            <div class="skin-selector">
+                <p class="skin-label">Choose your Badrik:</p>
+                <div class="skin-buttons">
+                    <button class="skin-btn selected" data-skin="white">
+                        <span class="skin-preview white"></span>
+                        <span>Snowball</span>
+                    </button>
+                    <button class="skin-btn" data-skin="fawn">
+                        <span class="skin-preview fawn"></span>
+                        <span>Ginger</span>
+                    </button>
+                    <button class="skin-btn" data-skin="blackpied">
+                        <span class="skin-preview blackpied"></span>
+                        <span>Spotty</span>
+                    </button>
+                </div>
+            </div>
+            
+            <button id="startGame" class="start-button">
+                <span class="play-icon">▶</span>
+                PLAY
+            </button>
+            
+            <div class="leaderboard-preview">
+                <a href="#" id="showLeaderboard">🏆 Leaderboard</a>
+                <span class="separator">•</span>
+                <a href="#" id="showReferral">🎁 Invite Friends</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ИГРА -->
+    <div id="gameContainer" class="game-container" style="display: none;">
+        <canvas id="gameCanvas"></canvas>
+        
+        <!-- HUD -->
+        <div class="hud">
+            <div class="hud-left">
+                <div class="score-container">
+                    <span class="score-label">SCORE</span>
+                    <span id="score" class="score-value">0</span>
+                </div>
+                <div class="coins-container">
+                    <span class="coin-icon">🦴</span>
+                    <span id="coins" class="coins-value">0</span>
+                </div>
+            </div>
+            <div class="hud-right">
+                <div class="distance-container">
+                    <span id="distance" class="distance-value">0</span>
+                    <span class="distance-label">m</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Мобильное управление -->
+        <div class="mobile-controls">
+            <div class="swipe-hint">Swipe ← → to move, ↑ to jump</div>
+        </div>
+    </div>
+
+    <!-- GAME OVER -->
+    <div id="gameOver" class="game-over" style="display: none;">
+        <div class="game-over-content">
+            <h2>GAME OVER</h2>
+            
+            <div class="final-stats">
+                <div class="stat">
+                    <span class="stat-label">Score</span>
+                    <span id="finalScore" class="stat-value">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Bones</span>
+                    <span id="finalCoins" class="stat-value">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Distance</span>
+                    <span id="finalDistance" class="stat-value">0m</span>
+                </div>
+            </div>
+            
+            <div class="best-score">
+                <span>🏆 Best: </span>
+                <span id="bestScore">0</span>
+            </div>
+            
+            <div class="game-over-buttons">
+                <button id="playAgain" class="play-again-btn">Play Again</button>
+                <button id="backToMenu" class="menu-btn">Menu</button>
+            </div>
+            
+            <div class="share-section">
+                <p>Share your score:</p>
+                <button id="shareTwitter" class="share-btn twitter">𝕏 Tweet</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ЛИДЕРБОРД -->
+    <div id="leaderboardModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <button class="modal-close">&times;</button>
+            <h2>🏆 Leaderboard</h2>
+            <p class="modal-subtitle">Top players get $BADRIK airdrop!</p>
+            
+            <div id="leaderboardList" class="leaderboard-list">
+                <div class="loading">Loading...</div>
+            </div>
+            
+            <div class="your-rank">
+                <span>Your Rank: </span>
+                <span id="yourRank">#—</span>
+                <span> | Best Score: </span>
+                <span id="yourBestScore">0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- РЕФЕРАЛЬНАЯ СИСТЕМА -->
+    <div id="referralModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <button class="modal-close">&times;</button>
+            <h2>🎁 Invite Friends</h2>
+            <p class="modal-subtitle">Get +20% bonus to your friend's score!</p>
+            
+            <div class="referral-link-section">
+                <input type="text" id="referralLink" readonly>
+                <button id="copyReferral" class="copy-btn">Copy</button>
+            </div>
+            
+            <div class="referral-stats">
+                <div class="ref-stat">
+                    <span class="ref-value" id="referralCount">0</span>
+                    <span class="ref-label">Friends Invited</span>
+                </div>
+                <div class="ref-stat">
+                    <span class="ref-value" id="referralBonus">0</span>
+                    <span class="ref-label">Bonus Points</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module" src="game.js"></script>
+</body>
+</html>

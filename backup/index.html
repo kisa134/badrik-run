@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Badrik - 3D Game</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- МЕНЮ -->
+    <div id="menu" class="menu">
+        <!-- 3D бульдог на весь экран -->
+        <canvas id="menuCanvas"></canvas>
+        
+        <!-- UI поверх 3D -->
+        <div class="menu-ui">
+            <h1>🐕 Badrik</h1>
+            
+            <div class="skin-selector">
+                <button class="skin-btn" data-skin="white">Снежок</button>
+                <button class="skin-btn" data-skin="fawn">Рыжик</button>
+                <button class="skin-btn" data-skin="blackpied">Пятныш</button>
+            </div>
+            
+            <button id="startGame" class="start-button" disabled>Играть</button>
+        </div>
+    </div>
+
+    <!-- ИГРА -->
+    <div id="gameContainer" class="game-container" style="display: none;">
+        <canvas id="gameCanvas"></canvas>
+        <div class="controls-info">
+            <p><strong>🐕 Управление:</strong></p>
+            <p>WASD - движение | Shift - ходьба</p>
+            <p>Пробел - прыжок | Мышь - камера</p>
+            <p>1 - сесть | 2 - лечь | 3 - почесаться</p>
+        </div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module" src="game.js"></script>
+</body>
+</html>
