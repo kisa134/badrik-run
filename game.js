@@ -46,10 +46,10 @@ const CONFIG = {
     LANE_SWITCH_SPEED: 20,
     SLIDE_DURATION: 500,
     
-    // Spawning
+    // Spawning - obstacles visible earlier
     OBSTACLE_DISTANCE: 25,
     SHARD_DISTANCE: 3,
-    SPAWN_Z: -150,
+    SPAWN_Z: -200,
     DESPAWN_Z: 15,
     
     // Grid
@@ -308,19 +308,7 @@ class Game {
             this.menuDog.scale.set(1, 1, 1);
             this.menuDog.position.set(0, -0.3, 0);
             
-            // Neon outline effect - emissive edges
-            this.menuDog.traverse(child => {
-                if (child.isMesh) {
-                    child.material = new THREE.MeshStandardMaterial({
-                        color: 0xffffff,
-                        emissive: COLORS.green,
-                        emissiveIntensity: 0.1,
-                        roughness: 0.6,
-                        metalness: 0.2
-                    });
-                }
-            });
-            
+            // Keep original brown/natural colors - don't override materials
             this.menuScene.add(this.menuDog);
             
             // Animations
@@ -387,8 +375,8 @@ class Game {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(COLORS.black);
         
-        // Fog for distance fade
-        this.scene.fog = new THREE.Fog(COLORS.black, 80, 150);
+        // Cozy black fog - closer and denser
+        this.scene.fog = new THREE.Fog(COLORS.black, 60, 180);
         
         const canvas = document.getElementById('gameCanvas');
         this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 300);
@@ -558,21 +546,7 @@ class Game {
             this.dog.position.set(0, CONFIG.DOG_Y, 0);
             this.dog.rotation.y = Math.PI;
             
-            // Cyber dog material
-            this.dog.traverse(child => {
-                if (child.isMesh) {
-                    child.material = new THREE.MeshStandardMaterial({
-                        color: 0xffffff,
-                        emissive: this.phaseColor,
-                        emissiveIntensity: 0.15,
-                        roughness: 0.5,
-                        metalness: 0.3,
-                    });
-                    child.castShadow = false;
-                    child.receiveShadow = false;
-                }
-            });
-            
+            // Keep original brown colors - will add glow during boosts
             this.scene.add(this.dog);
             
             // Animations
