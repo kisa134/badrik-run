@@ -1,6 +1,6 @@
 /**
- * BADRIK RUN - Subway Surfer Style Runner v1.2
- * Fixed: menu dog, coins, obstacles, slide
+ * BADRIK RUN - Subway Surfer Style Runner v1.3
+ * Fixed: menu animation loop, dog size, better sounds
  */
 
 import * as THREE from 'three';
@@ -15,9 +15,9 @@ const CONFIG = {
     MAX_SPEED: 30,
     SPEED_INCREASE: 0.2,
     
-    JUMP_FORCE: 10,
-    GRAVITY: -30,
-    LANE_SWITCH_SPEED: 15,
+    JUMP_FORCE: 14,
+    GRAVITY: -40,
+    LANE_SWITCH_SPEED: 18,
     
     OBSTACLE_SPAWN_DISTANCE: 50,
     MIN_OBSTACLE_GAP: 25,
@@ -30,10 +30,12 @@ const CONFIG = {
     
     SLIDE_DURATION: 600,
     
-    // Hitbox sizes
-    PLAYER_WIDTH: 0.8,
-    PLAYER_HEIGHT: 1.0,
-    COIN_RADIUS: 0.5,
+    // Dog size in game (5x bigger)
+    DOG_SCALE: 5,
+    
+    // Menu animation timing
+    SCRATCH_INTERVAL: 4000, // 4 seconds between scratches
+    SCRATCH_DURATION: 2000, // scratch animation lasts 2 sec
 };
 
 // ==================== SOUND MANAGER ====================
@@ -44,18 +46,19 @@ class SoundManager {
     }
     
     async load() {
+        // Better sound selections
         const soundFiles = {
-            coin: 'Pick Up/Etherealchimewith13.mp3',
-            crash: 'Destruction/Destructionsoundsw5.mp3',
-            jump: 'Drop/BouncyRubberBall6.mp3',
-            slide: 'Drag/Acontinuoussoundr1.mp3',
-            button: 'Inventory/ItemMoveSelectSoft5.mp3',
+            coin: 'Inventory/StackItemsCoinscl13.mp3',      // Coin collect sound
+            crash: 'Destruction/WoodenChairBarre21.mp3',    // Softer crash
+            jump: 'Drop/Asatisfyingimpact1.mp3',            // Satisfying jump
+            slide: 'Drag/ElevenabsTSoundEffect13.mp3',      // Quick swoosh
+            button: 'Inventory/Menufriendlysounds9.mp3',    // Soft UI click
         };
         
         for (const [name, path] of Object.entries(soundFiles)) {
             try {
                 const audio = new Audio(path);
-                audio.volume = name === 'coin' ? 0.4 : 0.5;
+                audio.volume = 0.4;
                 this.sounds[name] = audio;
             } catch (e) {
                 console.warn(`Failed to load sound: ${path}`);
@@ -67,6 +70,7 @@ class SoundManager {
         if (!this.enabled || !this.sounds[name]) return;
         try {
             const sound = this.sounds[name].cloneNode();
+            sound.volume = name === 'coin' ? 0.3 : 0.4;
             sound.play().catch(() => {});
         } catch (e) {}
     }
@@ -130,15 +134,6 @@ class GameAPI {
             return [];
         }
     }
-    
-    static async getPlayerRank(wallet) {
-        try {
-            const response = await fetch(`${API_URL}/api/rank/${wallet}`);
-            return await response.json();
-        } catch (error) {
-            return { rank: null, bestScore: 0 };
-        }
-    }
 }
 
 
@@ -175,8 +170,9 @@ class BadrikRunner {
         this.menuDog = null;
         this.menuMixer = null;
         this.menuAnimations = {};
+        this.menuAnimState = 'sit'; // 'sit' or 'scratch'
         this.lastScratchTime = 0;
-        this.isSitting = false;
+        this.scratchStartTime = 0;
         
         // Player
         this.dog = null;
@@ -234,10 +230,10 @@ class BadrikRunner {
         this.menuScene = new THREE.Scene();
         this.menuScene.background = new THREE.Color(0x0a0a1a);
         
-        // Camera - closer and lower for sitting dog
+        // Camera positioned for sitting dog
         this.menuCamera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-        this.menuCamera.position.set(0, 0.4, 1.5);
-        this.menuCamera.lookAt(0, 0.2, 0);
+        this.menuCamera.position.set(0, 0.5, 1.8);
+        this.menuCamera.lookAt(0, 0.25, 0);
         
         const canvas = document.getElementById('menuCanvas');
         this.menuRenderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -259,7 +255,7 @@ class BadrikRunner {
         
         this.menuScene.add(new THREE.AmbientLight(0xffffff, 0.5));
         
-        // Floor for shadow
+        // Floor
         const floorGeo = new THREE.PlaneGeometry(5, 5);
         const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1a2e });
         const floor = new THREE.Mesh(floorGeo, floorMat);
@@ -276,43 +272,45 @@ class BadrikRunner {
             this.menuDog = gltf.scene;
             this.menuDog.scale.set(1, 1, 1);
             this.menuDog.position.set(0, 0, 0);
-            this.menuDog.rotation.y = 0; // Face camera
+            this.menuDog.rotation.y = 0;
             
             this.applyTexture(this.menuDog, 'white');
             this.menuScene.add(this.menuDog);
             
-            // Setup all menu animations
+            // Setup animations
             if (gltf.animations.length > 0) {
                 this.menuMixer = new THREE.AnimationMixer(this.menuDog);
                 
                 gltf.animations.forEach(clip => {
-                    this.menuAnimations[clip.name] = this.menuMixer.clipAction(clip);
+                    const action = this.menuMixer.clipAction(clip);
+                    action.clampWhenFinished = true;
+                    this.menuAnimations[clip.name] = action;
                 });
                 
-                // Start with sitting
-                this.playMenuAnimation('sit');
-                this.isSitting = true;
+                // Start sitting
+                this.playMenuAnimation('sit', true);
+                this.menuAnimState = 'sit';
                 this.lastScratchTime = Date.now();
+                
+                console.log('Menu animations:', Object.keys(this.menuAnimations));
             }
-            
-            console.log('Menu dog loaded, animations:', Object.keys(this.menuAnimations));
-        }, 
-        (progress) => {
-            console.log('Loading:', (progress.loaded / progress.total * 100).toFixed(0) + '%');
-        },
-        (error) => {
-            console.error('Error loading dog:', error);
         });
     }
     
-    playMenuAnimation(name) {
+    playMenuAnimation(name, loop = true) {
         const animName = Object.keys(this.menuAnimations).find(n => 
             n.toLowerCase().includes(name.toLowerCase())
         );
         if (!animName) return;
         
+        // Fade out all
         Object.values(this.menuAnimations).forEach(a => a.fadeOut(0.3));
-        this.menuAnimations[animName].reset().fadeIn(0.3).play();
+        
+        const action = this.menuAnimations[animName];
+        action.reset();
+        action.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce);
+        action.fadeIn(0.3);
+        action.play();
     }
     
     applyTexture(model, skinName) {
@@ -364,7 +362,7 @@ class BadrikRunner {
             this.startGame();
         });
         
-        // Game over
+        // Game over buttons
         document.getElementById('playAgain').addEventListener('click', () => {
             this.sound.play('button');
             this.restartGame();
@@ -404,7 +402,6 @@ class BadrikRunner {
         document.getElementById('leaderboardModal').style.display = 'flex';
         document.getElementById('leaderboardList').innerHTML = '<div class="loading">Loading...</div>';
         
-        // Mock data for now
         const mockData = [
             { wallet: '7xK9...3mPq', score: 158000 },
             { wallet: '3nB2...9xLw', score: 142500 },
@@ -464,11 +461,9 @@ class BadrikRunner {
     }
     
     spawnInitialObjects() {
-        // Spawn some coins at start
         for (let i = 0; i < 3; i++) {
             this.spawnCoinRow();
         }
-        // Spawn first obstacle
         this.spawnObstacle();
     }
     
@@ -480,7 +475,7 @@ class BadrikRunner {
         
         if (this.dog) {
             this.dog.position.set(CONFIG.LANES[1], 0, 0);
-            this.dog.scale.set(1, 1, 1);
+            this.dog.scale.set(CONFIG.DOG_SCALE, CONFIG.DOG_SCALE, CONFIG.DOG_SCALE);
         }
         
         this.score = 0;
@@ -511,7 +506,11 @@ class BadrikRunner {
         document.getElementById('gameOver').style.display = 'none';
         document.getElementById('menu').style.display = 'block';
         
+        // Reset menu animation state
+        this.menuAnimState = 'sit';
         this.lastScratchTime = Date.now();
+        this.playMenuAnimation('sit', true);
+        
         this.animateMenu();
     }
 
@@ -520,12 +519,13 @@ class BadrikRunner {
     initGameScene() {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x1a0a2e);
-        this.scene.fog = new THREE.Fog(0x1a0a2e, 30, 100);
+        this.scene.fog = new THREE.Fog(0x1a0a2e, 50, 150);
         
         const canvas = document.getElementById('gameCanvas');
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
-        this.camera.position.set(0, 5, 10);
-        this.camera.lookAt(0, 0, -10);
+        // Camera higher and further back for bigger dog
+        this.camera.position.set(0, 12, 25);
+        this.camera.lookAt(0, 2, -10);
         
         this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -534,15 +534,15 @@ class BadrikRunner {
         
         // Lighting
         const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-        sun.position.set(10, 30, 10);
+        sun.position.set(20, 50, 20);
         sun.castShadow = true;
         sun.shadow.mapSize.width = 2048;
         sun.shadow.mapSize.height = 2048;
-        sun.shadow.camera.far = 100;
-        sun.shadow.camera.left = -30;
-        sun.shadow.camera.right = 30;
-        sun.shadow.camera.top = 30;
-        sun.shadow.camera.bottom = -30;
+        sun.shadow.camera.far = 150;
+        sun.shadow.camera.left = -50;
+        sun.shadow.camera.right = 50;
+        sun.shadow.camera.top = 50;
+        sun.shadow.camera.bottom = -50;
         this.scene.add(sun);
         
         this.scene.add(new THREE.AmbientLight(0xffc864, 0.4));
@@ -550,8 +550,8 @@ class BadrikRunner {
     }
     
     createWorld() {
-        // Ground
-        const groundGeo = new THREE.PlaneGeometry(20, CONFIG.GROUND_LENGTH);
+        // Wider ground for bigger dog
+        const groundGeo = new THREE.PlaneGeometry(40, CONFIG.GROUND_LENGTH);
         const groundMat = new THREE.MeshStandardMaterial({ color: 0x2a2a3e, roughness: 0.8 });
         
         for (let i = 0; i < CONFIG.GROUND_SEGMENTS; i++) {
@@ -563,17 +563,17 @@ class BadrikRunner {
             this.grounds.push(ground);
         }
         
-        // Lane lines
+        // Lane lines - wider apart
         const lineMat = new THREE.MeshBasicMaterial({ color: 0x444466 });
         [-CONFIG.LANE_WIDTH, CONFIG.LANE_WIDTH].forEach(x => {
-            const lineGeo = new THREE.PlaneGeometry(0.15, CONFIG.GROUND_LENGTH * CONFIG.GROUND_SEGMENTS);
+            const lineGeo = new THREE.PlaneGeometry(0.2, CONFIG.GROUND_LENGTH * CONFIG.GROUND_SEGMENTS);
             const line = new THREE.Mesh(lineGeo, lineMat);
             line.rotation.x = -Math.PI / 2;
             line.position.set(x, 0.02, -CONFIG.GROUND_LENGTH);
             this.scene.add(line);
         });
         
-        // Side walls (glowing)
+        // Side walls - further out
         const wallMat = new THREE.MeshStandardMaterial({ 
             color: 0x14F195, 
             emissive: 0x14F195, 
@@ -581,10 +581,10 @@ class BadrikRunner {
             transparent: true,
             opacity: 0.4
         });
-        [-9, 9].forEach(x => {
-            const wallGeo = new THREE.BoxGeometry(0.5, 4, CONFIG.GROUND_LENGTH * CONFIG.GROUND_SEGMENTS);
+        [-15, 15].forEach(x => {
+            const wallGeo = new THREE.BoxGeometry(0.5, 8, CONFIG.GROUND_LENGTH * CONFIG.GROUND_SEGMENTS);
             const wall = new THREE.Mesh(wallGeo, wallMat);
-            wall.position.set(x, 2, -CONFIG.GROUND_LENGTH);
+            wall.position.set(x, 4, -CONFIG.GROUND_LENGTH);
             this.scene.add(wall);
         });
     }
@@ -594,7 +594,8 @@ class BadrikRunner {
     loadPlayer() {
         this.loader.load('bulldog.glb', (gltf) => {
             this.dog = gltf.scene;
-            this.dog.scale.set(1, 1, 1);
+            // 5x bigger dog!
+            this.dog.scale.set(CONFIG.DOG_SCALE, CONFIG.DOG_SCALE, CONFIG.DOG_SCALE);
             this.dog.position.set(CONFIG.LANES[1], 0, 0);
             this.dog.rotation.y = Math.PI; // Face forward
             
@@ -687,8 +688,8 @@ class BadrikRunner {
         if (!this.isSliding && !this.isJumping && this.dog) {
             this.isSliding = true;
             this.slideTimer = CONFIG.SLIDE_DURATION;
-            this.dog.scale.set(1, 0.4, 1); // Squash down
-            this.dog.position.y = 0;
+            // Squash the dog down (scale Y to 40%)
+            this.dog.scale.set(CONFIG.DOG_SCALE, CONFIG.DOG_SCALE * 0.4, CONFIG.DOG_SCALE);
             this.playAnimation('lay');
             this.sound.play('slide');
         }
@@ -700,45 +701,43 @@ class BadrikRunner {
         const lane = Math.floor(Math.random() * 3);
         const x = CONFIG.LANES[lane];
         
-        // 3 types: normal (jump or dodge), tall (must dodge), low (must slide)
+        // 3 types: normal, tall, low (for sliding)
         const types = ['normal', 'normal', 'tall', 'low'];
         const type = types[Math.floor(Math.random() * types.length)];
         
-        let geometry, material, height, yPos;
+        let geometry, material, yPos;
         
+        // Obstacles scaled up for bigger dog
         switch(type) {
             case 'normal':
-                geometry = new THREE.BoxGeometry(1.8, 1.5, 1.8);
+                geometry = new THREE.BoxGeometry(3, 4, 3);
                 material = new THREE.MeshStandardMaterial({
                     color: 0xff4444,
                     emissive: 0xff0000,
                     emissiveIntensity: 0.3
                 });
-                height = 1.5;
-                yPos = 0.75;
+                yPos = 2;
                 break;
                 
             case 'tall':
-                geometry = new THREE.BoxGeometry(1.2, 4, 1.2);
+                geometry = new THREE.BoxGeometry(2.5, 10, 2.5);
                 material = new THREE.MeshStandardMaterial({
                     color: 0xff6600,
                     emissive: 0xff3300,
                     emissiveIntensity: 0.3
                 });
-                height = 4;
-                yPos = 2;
+                yPos = 5;
                 break;
                 
             case 'low':
-                // LOW obstacle - must slide under!
-                geometry = new THREE.BoxGeometry(2.2, 1.2, 2.2);
+                // LOW obstacle - MUST slide under!
+                geometry = new THREE.BoxGeometry(4, 2.5, 4);
                 material = new THREE.MeshStandardMaterial({
                     color: 0x00ff88,
                     emissive: 0x00aa44,
                     emissiveIntensity: 0.4
                 });
-                height = 1.2;
-                yPos = 1.5; // Floating - slide under
+                yPos = 4; // Floating - player slides under
                 break;
         }
         
@@ -746,7 +745,7 @@ class BadrikRunner {
         obstacle.position.set(x, yPos, this.lastObstacleZ - CONFIG.OBSTACLE_SPAWN_DISTANCE);
         obstacle.castShadow = true;
         obstacle.receiveShadow = true;
-        obstacle.userData = { type: 'obstacle', obstacleType: type, height };
+        obstacle.userData = { type: 'obstacle', obstacleType: type };
         
         this.scene.add(obstacle);
         this.obstacles.push(obstacle);
@@ -760,8 +759,8 @@ class BadrikRunner {
         const count = 3 + Math.floor(Math.random() * 4);
         
         for (let i = 0; i < count; i++) {
-            // Vertical standing coin (like a ring)
-            const coinGeo = new THREE.TorusGeometry(0.4, 0.12, 12, 24);
+            // Bigger coins for bigger dog
+            const coinGeo = new THREE.TorusGeometry(0.8, 0.25, 12, 24);
             const coinMat = new THREE.MeshStandardMaterial({
                 color: 0xffd700,
                 emissive: 0xffaa00,
@@ -771,8 +770,8 @@ class BadrikRunner {
             });
             
             const coin = new THREE.Mesh(coinGeo, coinMat);
-            coin.position.set(x, 1, this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - i * 2.5);
-            // Stand vertically (facing player)
+            coin.position.set(x, 2.5, this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - i * 4);
+            // Standing vertical, facing player
             coin.rotation.y = Math.PI / 2;
             coin.userData = { type: 'coin' };
             
@@ -780,7 +779,7 @@ class BadrikRunner {
             this.coinObjects.push(coin);
         }
         
-        this.lastCoinZ = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - count * 2.5;
+        this.lastCoinZ = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - count * 4;
     }
 
 
@@ -792,9 +791,8 @@ class BadrikRunner {
         const playerY = this.dog.position.y;
         const playerZ = this.dog.position.z;
         
-        // Player hitbox
-        const pHalfW = CONFIG.PLAYER_WIDTH / 2;
-        const pHeight = this.isSliding ? 0.4 : CONFIG.PLAYER_HEIGHT;
+        // Adjusted hitbox for bigger dog
+        const playerHeight = this.isSliding ? 2 : 5;
         
         // Check obstacles
         for (const obstacle of this.obstacles) {
@@ -803,35 +801,32 @@ class BadrikRunner {
             const oz = obstacle.position.z;
             const oType = obstacle.userData.obstacleType;
             
-            // Distance check first
-            if (Math.abs(oz - playerZ) > 2) continue;
-            if (Math.abs(ox - playerX) > 2) continue;
+            // Distance check
+            if (Math.abs(oz - playerZ) > 4) continue;
+            if (Math.abs(ox - playerX) > 3) continue;
             
-            // Lane check
-            if (Math.abs(ox - playerX) < 1.5) {
-                // Z overlap check
-                if (oz > playerZ - 1 && oz < playerZ + 1) {
+            // In same lane
+            if (Math.abs(ox - playerX) < 2.5) {
+                // Z overlap
+                if (oz > playerZ - 2 && oz < playerZ + 2) {
                     
                     // Low obstacle - can slide under
                     if (oType === 'low') {
                         if (!this.isSliding) {
-                            // Hit if not sliding
                             this.gameOver();
                             return;
                         }
-                        // Sliding - safe!
-                        continue;
+                        continue; // Safe if sliding
                     }
                     
-                    // Normal/tall obstacle
+                    // Tall obstacle - must dodge
                     if (oType === 'tall') {
-                        // Must dodge, can't jump over
                         this.gameOver();
                         return;
                     }
                     
                     // Normal obstacle - can jump over
-                    if (playerY < 1.2) {
+                    if (playerY < 3) {
                         this.gameOver();
                         return;
                     }
@@ -845,12 +840,10 @@ class BadrikRunner {
             const cx = coin.position.x;
             const cz = coin.position.z;
             
-            // Simple distance check
             const distX = Math.abs(cx - playerX);
             const distZ = Math.abs(cz - playerZ);
             
-            if (distX < 1.2 && distZ < 1.2) {
-                // Collect coin!
+            if (distX < 2 && distZ < 2) {
                 this.scene.remove(coin);
                 this.coinObjects.splice(i, 1);
                 this.coins++;
@@ -877,7 +870,6 @@ class BadrikRunner {
         document.getElementById('finalDistance').textContent = Math.floor(this.distance) + 'm';
         document.getElementById('bestScore').textContent = this.bestScore.toLocaleString();
         
-        // Submit to backend
         if (this.wallet.connected) {
             GameAPI.submitScore(this.wallet.address, this.score, this.coins, Math.floor(this.distance));
         }
@@ -888,7 +880,7 @@ class BadrikRunner {
     update(delta) {
         if (!this.isPlaying || this.isGameOver || !this.dog) return;
         
-        // Speed increases
+        // Speed
         this.speed = Math.min(this.speed + CONFIG.SPEED_INCREASE * delta, CONFIG.MAX_SPEED);
         this.distance += this.speed * delta;
         
@@ -918,7 +910,7 @@ class BadrikRunner {
             this.slideTimer -= delta * 1000;
             if (this.slideTimer <= 0) {
                 this.isSliding = false;
-                this.dog.scale.set(1, 1, 1);
+                this.dog.scale.set(CONFIG.DOG_SCALE, CONFIG.DOG_SCALE, CONFIG.DOG_SCALE);
                 this.playAnimation('run');
             }
         }
@@ -928,7 +920,7 @@ class BadrikRunner {
             const obstacle = this.obstacles[i];
             obstacle.position.z += this.speed * delta;
             
-            if (obstacle.position.z > 15) {
+            if (obstacle.position.z > 20) {
                 this.scene.remove(obstacle);
                 this.obstacles.splice(i, 1);
             }
@@ -938,9 +930,9 @@ class BadrikRunner {
         for (let i = this.coinObjects.length - 1; i >= 0; i--) {
             const coin = this.coinObjects[i];
             coin.position.z += this.speed * delta;
-            coin.rotation.z += delta * 4; // Spin
+            coin.rotation.z += delta * 4;
             
-            if (coin.position.z > 15) {
+            if (coin.position.z > 20) {
                 this.scene.remove(coin);
                 this.coinObjects.splice(i, 1);
             }
@@ -963,7 +955,7 @@ class BadrikRunner {
         // Collisions
         this.checkCollisions();
         
-        // Update score (distance + coins)
+        // Update score
         this.score = Math.floor(this.distance) + this.coins * CONFIG.COIN_VALUE;
         
         // Update HUD
@@ -986,27 +978,32 @@ class BadrikRunner {
         requestAnimationFrame(() => this.animateMenu());
         
         const delta = this.clock.getDelta();
+        const now = Date.now();
         
         if (this.menuMixer) {
             this.menuMixer.update(delta);
         }
         
-        // Scratch every 3 seconds
-        if (this.menuDog && Date.now() - this.lastScratchTime > 3000) {
-            this.playMenuAnimation('itch');
-            this.lastScratchTime = Date.now();
-            
-            // Return to sit after scratch
-            setTimeout(() => {
-                if (this.isInMenu) {
-                    this.playMenuAnimation('sit');
-                }
-            }, 2500);
+        // State machine for menu animations
+        if (this.menuAnimState === 'sit') {
+            // Check if it's time to scratch
+            if (now - this.lastScratchTime > CONFIG.SCRATCH_INTERVAL) {
+                this.menuAnimState = 'scratch';
+                this.scratchStartTime = now;
+                this.playMenuAnimation('itch', false); // Play once
+            }
+        } else if (this.menuAnimState === 'scratch') {
+            // Check if scratch animation is done
+            if (now - this.scratchStartTime > CONFIG.SCRATCH_DURATION) {
+                this.menuAnimState = 'sit';
+                this.lastScratchTime = now;
+                this.playMenuAnimation('sit', true); // Loop sit
+            }
         }
         
         // Gentle rotation
         if (this.menuDog) {
-            this.menuDog.rotation.y = Math.sin(Date.now() * 0.0008) * 0.15;
+            this.menuDog.rotation.y = Math.sin(now * 0.0008) * 0.15;
         }
         
         this.menuRenderer.render(this.menuScene, this.menuCamera);
@@ -1019,11 +1016,11 @@ class BadrikRunner {
         const delta = Math.min(this.clock.getDelta(), 0.1);
         this.update(delta);
         
-        // Camera follow
+        // Camera follow - adjusted for bigger dog
         if (this.dog && this.camera) {
             this.camera.position.x = this.dog.position.x * 0.5;
-            this.camera.position.y = 4 + this.dog.position.y * 0.3;
-            this.camera.lookAt(this.dog.position.x * 0.3, 0, -15);
+            this.camera.position.y = 10 + this.dog.position.y * 0.5;
+            this.camera.lookAt(this.dog.position.x * 0.3, 2, -20);
         }
         
         this.renderer.render(this.scene, this.camera);
