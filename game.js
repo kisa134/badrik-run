@@ -11,19 +11,20 @@ const CONFIG = {
     LANE_WIDTH: 2.5,
     LANES: [-2.5, 0, 2.5],
     
-    INITIAL_SPEED: 22,
-    MAX_SPEED: 45,
-    SPEED_INCREASE: 0.3,
+    INITIAL_SPEED: 25,
+    MAX_SPEED: 70,
+    SPEED_INCREASE: 0.8,  // Much faster acceleration!
     
     JUMP_FORCE: 14,
     GRAVITY: -40,
-    LANE_SWITCH_SPEED: 18,
+    LANE_SWITCH_SPEED: 20,
     
-    // More obstacles and coins!
-    OBSTACLE_SPAWN_DISTANCE: 35,
-    MIN_OBSTACLE_GAP: 18,
+    // Dense obstacles!
+    OBSTACLE_SPAWN_DISTANCE: 20,
+    MIN_OBSTACLE_GAP: 12,
     
-    COIN_SPAWN_DISTANCE: 25,
+    // Bone trails spawn constantly
+    COIN_SPAWN_DISTANCE: 8,
     COIN_VALUE: 10,
     
     GROUND_LENGTH: 100,
@@ -35,7 +36,7 @@ const CONFIG = {
     SCRATCH_INTERVAL: 4000,
     SCRATCH_DURATION: 2000,
     
-    // Curved world - bends DOWN like Subway Surfers
+    // Curved world
     CURVE_STRENGTH: 0.0004,
     
     // Spawn distances
@@ -46,9 +47,9 @@ const CONFIG = {
     FOG_NEAR: 50,
     FOG_FAR: 250,
     
-    // Two-level system (run on top of obstacles)
+    // Two-level system
     GROUND_LEVEL: 0,
-    TOP_LEVEL: 4,  // Height of obstacle tops
+    TOP_LEVEL: 4,
     
     // Biomes
     BIOME_LENGTH: 1000,
@@ -1058,13 +1059,44 @@ class BadrikRunner {
 
     // ==================== OBSTACLES ====================
     spawnObstacle() {
-        const lane = Math.floor(Math.random() * 3);
-        const x = CONFIG.LANES[lane];
+        // Sometimes spawn obstacle combos (multiple lanes blocked)
+        const combo = Math.random() > 0.6;
         
-        // 4 types: normal, tall, low, platform (can run on top)
+        if (combo) {
+            this.spawnObstacleCombo();
+        } else {
+            this.spawnSingleObstacle(Math.floor(Math.random() * 3));
+        }
+    }
+    
+    spawnObstacleCombo() {
+        // Block 2 lanes, leave 1 open
+        const openLane = Math.floor(Math.random() * 3);
+        const spawnZ = this.lastObstacleZ - CONFIG.OBSTACLE_SPAWN_DISTANCE;
+        
+        for (let i = 0; i < 3; i++) {
+            if (i === openLane) continue;
+            
+            // Random type for blocked lanes
+            const types = ['normal', 'tall', 'low'];
+            const type = types[Math.floor(Math.random() * types.length)];
+            
+            this.createObstacle(CONFIG.LANES[i], spawnZ, type);
+        }
+        
+        this.lastObstacleZ = spawnZ;
+    }
+    
+    spawnSingleObstacle(laneIndex) {
         const types = ['normal', 'normal', 'tall', 'low', 'platform'];
         const type = types[Math.floor(Math.random() * types.length)];
+        const spawnZ = this.lastObstacleZ - CONFIG.OBSTACLE_SPAWN_DISTANCE;
         
+        this.createObstacle(CONFIG.LANES[laneIndex], spawnZ, type);
+        this.lastObstacleZ = spawnZ;
+    }
+    
+    createObstacle(x, z, type) {
         let geometry, material, yPos;
         
         switch(type) {
@@ -1099,7 +1131,6 @@ class BadrikRunner {
                 break;
                 
             case 'platform':
-                // Long platform - can run on top!
                 geometry = new THREE.BoxGeometry(3, 4, 15);
                 material = new THREE.MeshStandardMaterial({
                     color: 0x8844ff,
@@ -1111,72 +1142,108 @@ class BadrikRunner {
         }
         
         const obstacle = new THREE.Mesh(geometry, material);
-        const spawnZ = this.lastObstacleZ - CONFIG.OBSTACLE_SPAWN_DISTANCE;
-        obstacle.position.set(x, yPos, spawnZ);
+        obstacle.position.set(x, yPos, z);
         obstacle.castShadow = true;
         obstacle.receiveShadow = true;
         obstacle.userData = { type: 'obstacle', obstacleType: type, baseX: x, baseY: yPos };
         
         this.scene.add(obstacle);
         this.obstacles.push(obstacle);
-        this.lastObstacleZ = spawnZ;
     }
     
-    // ==================== COINS (BONES) ====================
+    // ==================== COINS (BONES) - TRAIL SYSTEM ====================
     spawnCoinRow() {
-        const lane = Math.floor(Math.random() * 3);
-        const x = CONFIG.LANES[lane];
-        const count = 4 + Math.floor(Math.random() * 5); // More bones!
+        // Pattern types: straight, curve, zigzag, trap (leads to obstacle)
+        const patterns = ['straight', 'straight', 'curve', 'zigzag', 'trap', 'arc'];
+        const pattern = patterns[Math.floor(Math.random() * patterns.length)];
         
-        // Sometimes spawn on top level (above obstacles)
-        const onTop = Math.random() > 0.7;
+        let startLane = Math.floor(Math.random() * 3);
+        const count = 8 + Math.floor(Math.random() * 8); // 8-15 bones per trail
+        
+        // Sometimes spawn on top level
+        const onTop = Math.random() > 0.75;
         const baseY = onTop ? CONFIG.TOP_LEVEL + 2 : 2;
         
         for (let i = 0; i < count; i++) {
-            let coin;
-            const zPos = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - i * 3;
-            const yPos = baseY + Math.sin(i * 0.5) * 0.5; // Wavy pattern
+            let laneIndex = startLane;
+            let yOffset = 0;
             
-            if (this.boneModel) {
-                // Use 3D bone model - smaller and glowing
-                coin = this.boneModel.clone();
-                coin.scale.set(1.2, 1.2, 1.2); // Smaller
-                coin.position.set(x, yPos, zPos);
-                // Different rotation - diagonal spin
-                coin.rotation.set(Math.PI / 4, 0, 0);
-                
-                // Add glow effect
-                coin.traverse(child => {
-                    if (child.isMesh) {
-                        child.material = new THREE.MeshStandardMaterial({
-                            color: 0xffd700,
-                            emissive: 0xffaa00,
-                            emissiveIntensity: 0.8,
-                            metalness: 0.9,
-                            roughness: 0.2
-                        });
+            // Calculate lane based on pattern
+            switch(pattern) {
+                case 'straight':
+                    // Stay in same lane
+                    break;
+                case 'curve':
+                    // Gradual curve to adjacent lane
+                    if (i > count / 2) {
+                        laneIndex = Math.min(2, Math.max(0, startLane + (Math.random() > 0.5 ? 1 : -1)));
                     }
-                });
-            } else {
-                // Fallback - glowing torus
-                const coinGeo = new THREE.TorusGeometry(0.5, 0.15, 12, 24);
-                const coinMat = new THREE.MeshStandardMaterial({
-                    color: 0xffd700,
-                    emissive: 0xffaa00,
-                    emissiveIntensity: 0.9,
-                    metalness: 0.9,
-                    roughness: 0.1
-                });
-                coin = new THREE.Mesh(coinGeo, coinMat);
-                coin.position.set(x, yPos, zPos);
+                    break;
+                case 'zigzag':
+                    // Zigzag between lanes
+                    laneIndex = (startLane + Math.floor(i / 3)) % 3;
+                    break;
+                case 'trap':
+                    // Lead towards an obstacle (player must react!)
+                    if (i < count - 3) {
+                        // Normal path
+                    } else {
+                        // Last few bones go to dangerous lane
+                        laneIndex = (startLane + 1) % 3;
+                    }
+                    break;
+                case 'arc':
+                    // Arc up and down
+                    yOffset = Math.sin(i / count * Math.PI) * 3;
+                    break;
             }
             
-            coin.userData = { type: 'coin', baseX: x, baseY: yPos };
-            this.scene.add(coin);
-            this.coinObjects.push(coin);
+            const x = CONFIG.LANES[laneIndex];
+            const zPos = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - i * 2.5;
+            const yPos = baseY + yOffset + Math.sin(i * 0.3) * 0.3;
+            
+            this.spawnSingleBone(x, yPos, zPos);
         }
         
-        this.lastCoinZ = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - count * 3;
+        this.lastCoinZ = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - count * 2.5;
+    }
+    
+    spawnSingleBone(x, yPos, zPos) {
+        let coin;
+        
+        if (this.boneModel) {
+            coin = this.boneModel.clone();
+            coin.scale.set(1, 1, 1);
+            coin.position.set(x, yPos, zPos);
+            coin.rotation.set(Math.PI / 4, 0, 0);
+            
+            coin.traverse(child => {
+                if (child.isMesh) {
+                    child.material = new THREE.MeshStandardMaterial({
+                        color: 0xffd700,
+                        emissive: 0xffaa00,
+                        emissiveIntensity: 0.8,
+                        metalness: 0.9,
+                        roughness: 0.2
+                    });
+                }
+            });
+        } else {
+            const coinGeo = new THREE.TorusGeometry(0.4, 0.12, 10, 20);
+            const coinMat = new THREE.MeshStandardMaterial({
+                color: 0xffd700,
+                emissive: 0xffaa00,
+                emissiveIntensity: 0.9,
+                metalness: 0.9,
+                roughness: 0.1
+            });
+            coin = new THREE.Mesh(coinGeo, coinMat);
+            coin.position.set(x, yPos, zPos);
+        }
+        
+        coin.userData = { type: 'coin', baseX: x, baseY: yPos };
+        this.scene.add(coin);
+        this.coinObjects.push(coin);
     }
     
     // Spawn particle effect when collecting bone
