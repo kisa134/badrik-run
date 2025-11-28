@@ -11,9 +11,9 @@ const CONFIG = {
     LANE_WIDTH: 2.5,
     LANES: [-2.5, 0, 2.5],
     
-    INITIAL_SPEED: 12,
-    MAX_SPEED: 30,
-    SPEED_INCREASE: 0.2,
+    INITIAL_SPEED: 22,  // Faster start!
+    MAX_SPEED: 45,      // Higher max speed
+    SPEED_INCREASE: 0.3,
     
     JUMP_FORCE: 14,
     GRAVITY: -40,
@@ -42,27 +42,38 @@ const CONFIG = {
 class SoundManager {
     constructor() {
         this.sounds = {};
+        this.music = null;
         this.enabled = true;
+        this.musicPlaying = false;
     }
     
     async load() {
-        // Better sound selections
+        // New sound selections
         const soundFiles = {
-            coin: 'Inventory/StackItemsCoinscl13.mp3',      // Coin collect sound
-            crash: 'Destruction/WoodenChairBarre21.mp3',    // Softer crash
-            jump: 'Drop/Asatisfyingimpact1.mp3',            // Satisfying jump
-            slide: 'Drag/ElevenabsTSoundEffect13.mp3',      // Quick swoosh
-            button: 'Inventory/Menufriendlysounds9.mp3',    // Soft UI click
+            coin: 'Pick Up/Gentlehighpitched17.mp3',        // Bright coin pickup
+            crash: 'Destruction/BrittleGlassIce1.mp3',      // Impact crash
+            jump: 'Drop/BouncyRubberBall7.mp3',             // Bouncy jump
+            slide: 'Drag/Grittyirregulargr5.mp3',           // Slide swoosh
+            button: 'Inventory/Menufriendlysounds10.mp3',   // UI click
         };
         
         for (const [name, path] of Object.entries(soundFiles)) {
             try {
                 const audio = new Audio(path);
-                audio.volume = 0.4;
+                audio.volume = 0.5;
                 this.sounds[name] = audio;
             } catch (e) {
                 console.warn(`Failed to load sound: ${path}`);
             }
+        }
+        
+        // Load background music
+        try {
+            this.music = new Audio('NeonCityGroove_FULL_SONG_MusicGPT.mp3');
+            this.music.loop = true;
+            this.music.volume = 0.3;
+        } catch (e) {
+            console.warn('Failed to load music');
         }
     }
     
@@ -70,9 +81,24 @@ class SoundManager {
         if (!this.enabled || !this.sounds[name]) return;
         try {
             const sound = this.sounds[name].cloneNode();
-            sound.volume = name === 'coin' ? 0.3 : 0.4;
+            sound.volume = name === 'coin' ? 0.4 : 0.5;
             sound.play().catch(() => {});
         } catch (e) {}
+    }
+    
+    startMusic() {
+        if (this.music && !this.musicPlaying) {
+            this.music.play().catch(() => {});
+            this.musicPlaying = true;
+        }
+    }
+    
+    stopMusic() {
+        if (this.music) {
+            this.music.pause();
+            this.music.currentTime = 0;
+            this.musicPlaying = false;
+        }
     }
 }
 
@@ -457,6 +483,7 @@ class BadrikRunner {
         this.setupInput();
         this.spawnInitialObjects();
         this.updateHUD();
+        this.sound.startMusic(); // Start background music!
         this.animate();
     }
     
@@ -501,6 +528,7 @@ class BadrikRunner {
     backToMenu() {
         this.isPlaying = false;
         this.isInMenu = true;
+        this.sound.stopMusic(); // Stop music when going to menu
         
         document.getElementById('gameContainer').style.display = 'none';
         document.getElementById('gameOver').style.display = 'none';
@@ -858,6 +886,7 @@ class BadrikRunner {
         this.isPlaying = false;
         this.isGameOver = true;
         this.sound.play('crash');
+        this.sound.stopMusic(); // Stop music on game over
         
         if (this.score > this.bestScore) {
             this.bestScore = this.score;
