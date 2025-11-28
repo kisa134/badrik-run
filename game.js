@@ -394,18 +394,14 @@ class BadrikRunner {
                 child.castShadow = true;
                 child.receiveShadow = true;
                 
-                // Clone material to avoid sharing issues, then set texture
-                if (child.material) {
-                    child.material = child.material.clone();
-                    child.material.map = texture;
-                    child.material.needsUpdate = true;
-                } else {
-                    child.material = new THREE.MeshStandardMaterial({
-                        map: texture,
-                        roughness: 0.7,
-                        metalness: 0.1
-                    });
-                }
+                // Always create fresh opaque material with texture
+                child.material = new THREE.MeshStandardMaterial({
+                    map: texture,
+                    roughness: 0.6,
+                    metalness: 0.1,
+                    transparent: false,
+                    opacity: 1.0
+                });
             }
         });
     }
