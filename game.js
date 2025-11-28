@@ -325,6 +325,7 @@ class Game {
             
             // Animations
             if (gltf.animations.length > 0) {
+                this.menuAnimations = {};
                 this.menuMixer = new THREE.AnimationMixer(this.menuDog);
                 gltf.animations.forEach(clip => {
                     console.log('Menu animation found:', clip.name);
