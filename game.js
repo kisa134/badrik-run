@@ -1,6 +1,6 @@
 /**
- * BADRIK RUN - Subway Surfer Style Runner v1.3
- * Fixed: menu animation loop, dog size, better sounds
+ * BADRIK RUN - Subway Surfer Style Runner v1.5
+ * Biomes, Curved World, Better Visuals
  */
 
 import * as THREE from 'three';
@@ -11,8 +11,8 @@ const CONFIG = {
     LANE_WIDTH: 2.5,
     LANES: [-2.5, 0, 2.5],
     
-    INITIAL_SPEED: 22,  // Faster start!
-    MAX_SPEED: 45,      // Higher max speed
+    INITIAL_SPEED: 22,
+    MAX_SPEED: 45,
     SPEED_INCREASE: 0.3,
     
     JUMP_FORCE: 14,
@@ -25,17 +25,57 @@ const CONFIG = {
     COIN_SPAWN_DISTANCE: 30,
     COIN_VALUE: 10,
     
-    GROUND_LENGTH: 200,
-    GROUND_SEGMENTS: 4,
+    GROUND_LENGTH: 100,
+    GROUND_SEGMENTS: 6,
     
     SLIDE_DURATION: 600,
-    
-    // Dog size in game (5x bigger)
     DOG_SCALE: 5,
     
-    // Menu animation timing
-    SCRATCH_INTERVAL: 4000, // 4 seconds between scratches
-    SCRATCH_DURATION: 2000, // scratch animation lasts 2 sec
+    SCRATCH_INTERVAL: 4000,
+    SCRATCH_DURATION: 2000,
+    
+    // Curved world
+    CURVE_STRENGTH: 0.008,
+    
+    // Biomes
+    BIOME_LENGTH: 1000, // meters per biome
+};
+
+// ==================== BIOMES ====================
+const BIOMES = {
+    park: {
+        name: "Sunny Park",
+        skyColor: 0x87CEEB,
+        fogColor: 0x87CEEB,
+        groundColor: 0x4a7c32,
+        wallColor: 0x228B22,
+        decorColor1: 0x228B22, // Trees
+        decorColor2: 0x8B4513, // Benches
+        ambientColor: 0xffffcc,
+        startDistance: 0,
+    },
+    city: {
+        name: "Crypto City",
+        skyColor: 0x1a1a2e,
+        fogColor: 0x1a1a2e,
+        groundColor: 0x333344,
+        wallColor: 0x14F195,
+        decorColor1: 0x444466, // Buildings
+        decorColor2: 0x9945FF, // Billboards
+        ambientColor: 0x9945FF,
+        startDistance: 1000,
+    },
+    moon: {
+        name: "To The Moon",
+        skyColor: 0x0a0a15,
+        fogColor: 0x0a0a15,
+        groundColor: 0x2a2a3a,
+        wallColor: 0xffaa00,
+        decorColor1: 0x555566, // Craters
+        decorColor2: 0xff6600, // Rockets
+        ambientColor: 0xffcc00,
+        startDistance: 2000,
+    }
 };
 
 // ==================== SOUND MANAGER ====================
@@ -217,8 +257,14 @@ class BadrikRunner {
         this.grounds = [];
         this.obstacles = [];
         this.coinObjects = [];
+        this.decorations = [];
         this.lastObstacleZ = -30;
         this.lastCoinZ = -20;
+        this.lastDecorationZ = -20;
+        
+        // Biomes
+        this.currentBiome = 'park';
+        this.biomeObjects = []; // Objects to update on biome change
         
         // Textures
         this.textures = {};
@@ -505,8 +551,10 @@ class BadrikRunner {
     restartGame() {
         this.obstacles.forEach(o => this.scene.remove(o));
         this.coinObjects.forEach(c => this.scene.remove(c));
+        this.decorations.forEach(d => this.scene.remove(d));
         this.obstacles = [];
         this.coinObjects = [];
+        this.decorations = [];
         
         if (this.dog) {
             this.dog.position.set(CONFIG.LANES[1], 0, 0);
@@ -526,12 +574,20 @@ class BadrikRunner {
         this.isPlaying = true;
         this.lastObstacleZ = -30;
         this.lastCoinZ = -20;
+        this.lastDecorationZ = -20;
+        
+        // Reset biome to park
+        this.currentBiome = 'park';
+        this.transitionToBiome('park');
+        
+        // Respawn decorations
+        this.spawnDecorations();
         
         document.getElementById('gameOver').style.display = 'none';
         this.playAnimation('run');
         this.spawnInitialObjects();
         this.updateHUD();
-        this.sound.startMusic(); // Restart music on play again
+        this.sound.startMusic();
     }
     
     backToMenu() {
@@ -584,46 +640,200 @@ class BadrikRunner {
         
         this.scene.add(new THREE.AmbientLight(0xffc864, 0.4));
         this.scene.add(new THREE.HemisphereLight(0x14F195, 0x1a0a2e, 0.3));
+        
+        // Store lights for biome changes
+        this.sunLight = this.scene.children.find(c => c.type === 'DirectionalLight');
     }
     
     createWorld() {
-        // Wider ground for bigger dog
-        const groundGeo = new THREE.PlaneGeometry(40, CONFIG.GROUND_LENGTH);
-        const groundMat = new THREE.MeshStandardMaterial({ color: 0x2a2a3e, roughness: 0.8 });
+        const biome = BIOMES[this.currentBiome];
+        
+        // Ground with biome color
+        const groundGeo = new THREE.PlaneGeometry(40, CONFIG.GROUND_LENGTH, 1, 20);
+        const groundMat = new THREE.MeshStandardMaterial({ 
+            color: biome.groundColor, 
+            roughness: 0.8 
+        });
         
         for (let i = 0; i < CONFIG.GROUND_SEGMENTS; i++) {
-            const ground = new THREE.Mesh(groundGeo, groundMat);
+            const ground = new THREE.Mesh(groundGeo.clone(), groundMat.clone());
             ground.rotation.x = -Math.PI / 2;
             ground.position.z = -i * CONFIG.GROUND_LENGTH + CONFIG.GROUND_LENGTH / 2;
             ground.receiveShadow = true;
+            ground.userData.type = 'ground';
             this.scene.add(ground);
             this.grounds.push(ground);
+            this.biomeObjects.push(ground);
         }
         
-        // Lane lines - wider apart
-        const lineMat = new THREE.MeshBasicMaterial({ color: 0x444466 });
+        // Lane lines
+        const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 });
         [-CONFIG.LANE_WIDTH, CONFIG.LANE_WIDTH].forEach(x => {
-            const lineGeo = new THREE.PlaneGeometry(0.2, CONFIG.GROUND_LENGTH * CONFIG.GROUND_SEGMENTS);
+            const lineGeo = new THREE.PlaneGeometry(0.15, CONFIG.GROUND_LENGTH * CONFIG.GROUND_SEGMENTS);
             const line = new THREE.Mesh(lineGeo, lineMat);
             line.rotation.x = -Math.PI / 2;
-            line.position.set(x, 0.02, -CONFIG.GROUND_LENGTH);
+            line.position.set(x, 0.02, -CONFIG.GROUND_LENGTH * 2);
             this.scene.add(line);
         });
         
-        // Side walls - further out
+        // Side walls with biome color
         const wallMat = new THREE.MeshStandardMaterial({ 
-            color: 0x14F195, 
-            emissive: 0x14F195, 
+            color: biome.wallColor, 
+            emissive: biome.wallColor, 
             emissiveIntensity: 0.3,
             transparent: true,
-            opacity: 0.4
+            opacity: 0.5
         });
-        [-15, 15].forEach(x => {
-            const wallGeo = new THREE.BoxGeometry(0.5, 8, CONFIG.GROUND_LENGTH * CONFIG.GROUND_SEGMENTS);
-            const wall = new THREE.Mesh(wallGeo, wallMat);
-            wall.position.set(x, 4, -CONFIG.GROUND_LENGTH);
+        
+        this.walls = [];
+        [-12, 12].forEach(x => {
+            const wallGeo = new THREE.BoxGeometry(0.5, 6, CONFIG.GROUND_LENGTH * CONFIG.GROUND_SEGMENTS);
+            const wall = new THREE.Mesh(wallGeo, wallMat.clone());
+            wall.position.set(x, 3, -CONFIG.GROUND_LENGTH * 2);
+            wall.userData.type = 'wall';
             this.scene.add(wall);
+            this.walls.push(wall);
+            this.biomeObjects.push(wall);
         });
+        
+        // Spawn initial decorations
+        this.spawnDecorations();
+    }
+    
+    // ==================== BIOME SYSTEM ====================
+    getBiomeForDistance(dist) {
+        if (dist >= BIOMES.moon.startDistance) return 'moon';
+        if (dist >= BIOMES.city.startDistance) return 'city';
+        return 'park';
+    }
+    
+    updateBiome() {
+        const newBiome = this.getBiomeForDistance(this.distance);
+        if (newBiome !== this.currentBiome) {
+            this.currentBiome = newBiome;
+            this.transitionToBiome(newBiome);
+        }
+    }
+    
+    transitionToBiome(biomeName) {
+        const biome = BIOMES[biomeName];
+        
+        // Update sky/fog
+        this.scene.background = new THREE.Color(biome.skyColor);
+        this.scene.fog.color = new THREE.Color(biome.fogColor);
+        
+        // Update ground colors
+        this.grounds.forEach(ground => {
+            ground.material.color.setHex(biome.groundColor);
+        });
+        
+        // Update wall colors
+        this.walls.forEach(wall => {
+            wall.material.color.setHex(biome.wallColor);
+            wall.material.emissive.setHex(biome.wallColor);
+        });
+        
+        console.log(`🌍 Entered: ${biome.name}`);
+    }
+    
+    // ==================== DECORATIONS ====================
+    spawnDecorations() {
+        const biome = BIOMES[this.currentBiome];
+        
+        // Spawn decorations on both sides
+        for (let i = 0; i < 10; i++) {
+            this.spawnDecoration(-8 - Math.random() * 3, -i * 30 - Math.random() * 20);
+            this.spawnDecoration(8 + Math.random() * 3, -i * 30 - Math.random() * 20);
+        }
+        this.lastDecorationZ = -300;
+    }
+    
+    spawnDecoration(x, z) {
+        const biome = BIOMES[this.currentBiome];
+        const isLeft = x < 0;
+        
+        let geometry, material, yPos, scaleY;
+        
+        // Different decorations per biome
+        if (this.currentBiome === 'park') {
+            // Trees and benches
+            if (Math.random() > 0.3) {
+                // Tree (cylinder + sphere)
+                geometry = new THREE.CylinderGeometry(0.3, 0.5, 4, 8);
+                material = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+                yPos = 2;
+                scaleY = 1 + Math.random() * 0.5;
+                
+                const tree = new THREE.Mesh(geometry, material);
+                tree.position.set(x, yPos, z);
+                tree.scale.y = scaleY;
+                tree.userData.type = 'decoration';
+                this.scene.add(tree);
+                this.decorations.push(tree);
+                
+                // Tree top
+                const topGeo = new THREE.SphereGeometry(2, 8, 6);
+                const topMat = new THREE.MeshStandardMaterial({ color: biome.decorColor1 });
+                const top = new THREE.Mesh(topGeo, topMat);
+                top.position.set(x, 5 + scaleY, z);
+                top.userData.type = 'decoration';
+                this.scene.add(top);
+                this.decorations.push(top);
+            } else {
+                // Bench
+                geometry = new THREE.BoxGeometry(2, 0.5, 1);
+                material = new THREE.MeshStandardMaterial({ color: biome.decorColor2 });
+                yPos = 0.5;
+            }
+        } else if (this.currentBiome === 'city') {
+            // Buildings
+            const height = 5 + Math.random() * 15;
+            geometry = new THREE.BoxGeometry(3 + Math.random() * 2, height, 3 + Math.random() * 2);
+            material = new THREE.MeshStandardMaterial({ 
+                color: biome.decorColor1,
+                emissive: Math.random() > 0.5 ? biome.decorColor2 : 0x000000,
+                emissiveIntensity: 0.2
+            });
+            yPos = height / 2;
+        } else {
+            // Moon - craters and rockets
+            if (Math.random() > 0.2) {
+                // Crater
+                geometry = new THREE.CylinderGeometry(2, 3, 0.5, 12);
+                material = new THREE.MeshStandardMaterial({ color: biome.decorColor1 });
+                yPos = 0.1;
+            } else {
+                // Rocket
+                geometry = new THREE.ConeGeometry(1, 6, 8);
+                material = new THREE.MeshStandardMaterial({ 
+                    color: 0xcccccc,
+                    emissive: biome.decorColor2,
+                    emissiveIntensity: 0.5
+                });
+                yPos = 3;
+            }
+        }
+        
+        if (geometry) {
+            const deco = new THREE.Mesh(geometry, material);
+            deco.position.set(x, yPos, z);
+            deco.castShadow = true;
+            deco.userData.type = 'decoration';
+            this.scene.add(deco);
+            this.decorations.push(deco);
+        }
+    }
+    
+    // ==================== CURVED WORLD ====================
+    applyCurvedWorld(obj) {
+        if (!obj || obj.position.z > 10) return;
+        
+        const z = -obj.position.z;
+        if (z > 0) {
+            // Curve down based on distance
+            const curve = z * z * CONFIG.CURVE_STRENGTH;
+            obj.position.y = (obj.userData.baseY || obj.position.y) - curve;
+        }
     }
 
 
@@ -782,7 +992,7 @@ class BadrikRunner {
         obstacle.position.set(x, yPos, this.lastObstacleZ - CONFIG.OBSTACLE_SPAWN_DISTANCE);
         obstacle.castShadow = true;
         obstacle.receiveShadow = true;
-        obstacle.userData = { type: 'obstacle', obstacleType: type };
+        obstacle.userData = { type: 'obstacle', obstacleType: type, baseY: yPos };
         
         this.scene.add(obstacle);
         this.obstacles.push(obstacle);
@@ -810,7 +1020,7 @@ class BadrikRunner {
             coin.position.set(x, 2.5, this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - i * 4);
             // Standing vertical, facing player
             coin.rotation.y = Math.PI / 2;
-            coin.userData = { type: 'coin' };
+            coin.userData = { type: 'coin', baseY: 2.5 };
             
             this.scene.add(coin);
             this.coinObjects.push(coin);
@@ -924,6 +1134,9 @@ class BadrikRunner {
         this.speed = Math.min(this.speed + CONFIG.SPEED_INCREASE * delta, CONFIG.MAX_SPEED);
         this.distance += this.speed * delta;
         
+        // Check biome change
+        this.updateBiome();
+        
         // Lane switching
         const dx = this.targetX - this.dog.position.x;
         if (Math.abs(dx) > 0.1) {
@@ -955,10 +1168,16 @@ class BadrikRunner {
             }
         }
         
-        // Move obstacles
+        // Move obstacles with curved world
         for (let i = this.obstacles.length - 1; i >= 0; i--) {
             const obstacle = this.obstacles[i];
             obstacle.position.z += this.speed * delta;
+            
+            // Apply curved world effect
+            const z = -obstacle.position.z;
+            if (z > 0) {
+                obstacle.position.y = obstacle.userData.baseY - (z * z * CONFIG.CURVE_STRENGTH);
+            }
             
             if (obstacle.position.z > 20) {
                 this.scene.remove(obstacle);
@@ -966,16 +1185,49 @@ class BadrikRunner {
             }
         }
         
-        // Move coins
+        // Move coins with curved world
         for (let i = this.coinObjects.length - 1; i >= 0; i--) {
             const coin = this.coinObjects[i];
             coin.position.z += this.speed * delta;
             coin.rotation.z += delta * 4;
             
+            // Apply curved world effect
+            const z = -coin.position.z;
+            if (z > 0) {
+                coin.position.y = coin.userData.baseY - (z * z * CONFIG.CURVE_STRENGTH);
+            }
+            
             if (coin.position.z > 20) {
                 this.scene.remove(coin);
                 this.coinObjects.splice(i, 1);
             }
+        }
+        
+        // Move decorations with curved world
+        for (let i = this.decorations.length - 1; i >= 0; i--) {
+            const deco = this.decorations[i];
+            deco.position.z += this.speed * delta;
+            
+            // Apply curved world effect
+            const z = -deco.position.z;
+            if (z > 0) {
+                const baseY = deco.userData.baseY || deco.position.y;
+                if (!deco.userData.baseY) deco.userData.baseY = baseY;
+                deco.position.y = baseY - (z * z * CONFIG.CURVE_STRENGTH);
+            }
+            
+            if (deco.position.z > 30) {
+                this.scene.remove(deco);
+                this.decorations.splice(i, 1);
+            }
+        }
+        
+        // Spawn new decorations
+        const lastDecoZ = this.decorations.length > 0 ?
+            Math.min(...this.decorations.map(d => d.position.z)) : 0;
+        if (lastDecoZ > -200) {
+            this.spawnDecoration(-8 - Math.random() * 3, lastDecoZ - 20 - Math.random() * 10);
+            this.spawnDecoration(8 + Math.random() * 3, lastDecoZ - 25 - Math.random() * 10);
         }
         
         // Spawn new obstacles
