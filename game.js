@@ -1,6 +1,6 @@
 /**
- * BADRIK RUN - Subway Surfer Style Runner v1.5
- * Biomes, Curved World, Better Visuals
+ * BADRIK RUN - Subway Surfer Style Runner v1.8
+ * Fixed Curved World, New Sounds, Better Visuals
  */
 
 import * as THREE from 'three';
@@ -19,14 +19,14 @@ const CONFIG = {
     GRAVITY: -40,
     LANE_SWITCH_SPEED: 18,
     
-    OBSTACLE_SPAWN_DISTANCE: 150,  // Much further away
-    MIN_OBSTACLE_GAP: 35,
+    OBSTACLE_SPAWN_DISTANCE: 120,
+    MIN_OBSTACLE_GAP: 30,
     
-    COIN_SPAWN_DISTANCE: 120,      // Much further away
+    COIN_SPAWN_DISTANCE: 100,
     COIN_VALUE: 10,
     
     GROUND_LENGTH: 100,
-    GROUND_SEGMENTS: 6,
+    GROUND_SEGMENTS: 8,
     
     SLIDE_DURATION: 600,
     DOG_SCALE: 5,
@@ -34,13 +34,16 @@ const CONFIG = {
     SCRATCH_INTERVAL: 4000,
     SCRATCH_DURATION: 2000,
     
-    // Curved world - bends LEFT/RIGHT like Subway Surfers
-    CURVE_STRENGTH: 0.003,  // Horizontal curve amount
-    CURVE_DOWN: 0.015,      // Also curve down slightly
+    // Curved world - bends DOWN like Subway Surfers (NOT left/right!)
+    CURVE_STRENGTH: 0.0004,  // How much road curves down
     
     // Spawn distances
-    SPAWN_START_Z: -250,    // Objects spawn far away near fog
-    DECORATION_SPAWN_Z: -350,
+    SPAWN_START_Z: -200,
+    DECORATION_SPAWN_Z: -300,
+    
+    // Fog
+    FOG_NEAR: 50,
+    FOG_FAR: 250,
     
     // Biomes
     BIOME_LENGTH: 1000,
@@ -87,19 +90,21 @@ const BIOMES = {
 class SoundManager {
     constructor() {
         this.sounds = {};
-        this.music = null;
+        this.menuMusic = null;
+        this.gameMusic = [];
+        this.currentGameMusic = null;
         this.enabled = true;
         this.musicPlaying = false;
     }
     
     async load() {
-        // New sound selections
+        // Sound effects
         const soundFiles = {
-            coin: 'Pick Up/Gentlehighpitched17.mp3',        // Bright coin pickup
-            crash: 'Destruction/BrittleGlassIce1.mp3',      // Impact crash
-            jump: 'Drop/BouncyRubberBall7.mp3',             // Bouncy jump
-            slide: 'Drag/Grittyirregulargr5.mp3',           // Slide swoosh
-            button: 'Inventory/Menufriendlysounds10.mp3',   // UI click
+            coin: 'coin-take.mp3',
+            crash: 'Destruction/BrittleGlassIce1.mp3',
+            jump: 'jump.mp3',
+            slide: 'Drag/Grittyirregulargr5.mp3',
+            button: 'Inventory/Menufriendlysounds10.mp3',
         };
         
         for (const [name, path] of Object.entries(soundFiles)) {
@@ -112,38 +117,64 @@ class SoundManager {
             }
         }
         
-        // Load background music
+        // Menu music
         try {
-            this.music = new Audio('NeonCityGroove_FULL_SONG_MusicGPT.mp3');
-            this.music.loop = true;
-            this.music.volume = 0.3;
-        } catch (e) {
-            console.warn('Failed to load music');
-        }
+            this.menuMusic = new Audio('menu.mp3');
+            this.menuMusic.loop = true;
+            this.menuMusic.volume = 0.25;
+        } catch (e) {}
+        
+        // Game music (2 tracks, random)
+        try {
+            this.gameMusic = [
+                new Audio('game1.mp3'),
+                new Audio('game2.mp3')
+            ];
+            this.gameMusic.forEach(m => {
+                m.loop = true;
+                m.volume = 0.3;
+            });
+        } catch (e) {}
     }
     
     play(name) {
         if (!this.enabled || !this.sounds[name]) return;
         try {
             const sound = this.sounds[name].cloneNode();
-            sound.volume = name === 'coin' ? 0.4 : 0.5;
+            sound.volume = name === 'coin' ? 0.5 : 0.6;
             sound.play().catch(() => {});
         } catch (e) {}
     }
     
-    startMusic() {
-        if (this.music && !this.musicPlaying) {
-            this.music.play().catch(() => {});
+    startMenuMusic() {
+        this.stopAllMusic();
+        if (this.menuMusic) {
+            this.menuMusic.play().catch(() => {});
             this.musicPlaying = true;
         }
     }
     
-    stopMusic() {
-        if (this.music) {
-            this.music.pause();
-            this.music.currentTime = 0;
-            this.musicPlaying = false;
+    startGameMusic() {
+        this.stopAllMusic();
+        if (this.gameMusic.length > 0) {
+            // Pick random game track
+            const idx = Math.floor(Math.random() * this.gameMusic.length);
+            this.currentGameMusic = this.gameMusic[idx];
+            this.currentGameMusic.play().catch(() => {});
+            this.musicPlaying = true;
         }
+    }
+    
+    stopAllMusic() {
+        if (this.menuMusic) {
+            this.menuMusic.pause();
+            this.menuMusic.currentTime = 0;
+        }
+        if (this.currentGameMusic) {
+            this.currentGameMusic.pause();
+            this.currentGameMusic.currentTime = 0;
+        }
+        this.musicPlaying = false;
     }
 }
 
@@ -307,6 +338,7 @@ class BadrikRunner {
         
         this.initMenuScene();
         this.initUI();
+        this.sound.startMenuMusic(); // Start menu music
         this.animateMenu();
     }
 
@@ -547,7 +579,7 @@ class BadrikRunner {
         this.setupInput();
         this.spawnInitialObjects();
         this.updateHUD();
-        this.sound.startMusic(); // Start background music!
+        this.sound.startGameMusic(); // Start game music!
         this.animate();
     }
     
@@ -597,13 +629,14 @@ class BadrikRunner {
         this.playAnimation('run');
         this.spawnInitialObjects();
         this.updateHUD();
-        this.sound.startMusic();
+        this.sound.startGameMusic();
     }
     
     backToMenu() {
         this.isPlaying = false;
         this.isInMenu = true;
-        this.sound.stopMusic(); // Stop music when going to menu
+        this.sound.stopAllMusic();
+        this.sound.startMenuMusic(); // Start menu music
         
         document.getElementById('gameContainer').style.display = 'none';
         document.getElementById('gameOver').style.display = 'none';
@@ -621,14 +654,14 @@ class BadrikRunner {
     // ==================== GAME SCENE ====================
     initGameScene() {
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x1a0a2e);
-        this.scene.fog = new THREE.Fog(0x1a0a2e, 50, 150);
+        this.scene.background = new THREE.Color(0x87CEEB); // Sky blue for park
+        this.scene.fog = new THREE.Fog(0x87CEEB, CONFIG.FOG_NEAR, CONFIG.FOG_FAR);
         
         const canvas = document.getElementById('gameCanvas');
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
-        // Camera higher and further back for bigger dog
-        this.camera.position.set(0, 12, 25);
-        this.camera.lookAt(0, 2, -10);
+        // Camera behind and above dog
+        this.camera.position.set(0, 8, 18);
+        this.camera.lookAt(0, 2, -20);
         
         this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -662,28 +695,23 @@ class BadrikRunner {
         const roadTexture = this.textureLoader.load('road.png');
         roadTexture.wrapS = THREE.RepeatWrapping;
         roadTexture.wrapT = THREE.RepeatWrapping;
-        roadTexture.repeat.set(2, 10);
+        roadTexture.repeat.set(1, 8);
         
         const grassTexture = this.textureLoader.load('grass (1).png');
         grassTexture.wrapS = THREE.RepeatWrapping;
         grassTexture.wrapT = THREE.RepeatWrapping;
-        grassTexture.repeat.set(4, 10);
+        grassTexture.repeat.set(3, 8);
         
-        // Create curved road geometry (center) - curves LEFT/RIGHT
-        const roadGeo = new THREE.PlaneGeometry(12, CONFIG.GROUND_LENGTH, 20, 60);
+        // Create curved road geometry - curves DOWN only (like Subway Surfers)
+        const roadGeo = new THREE.PlaneGeometry(10, CONFIG.GROUND_LENGTH, 1, 50);
         
-        // Bend the road horizontally (left/right curve) + slightly down
+        // Bend the road DOWN at distance (NOT left/right!)
         const pos = roadGeo.attributes.position;
         for (let i = 0; i < pos.count; i++) {
-            const x = pos.getX(i);
             const z = pos.getZ(i);
             if (z < 0) {
-                // Horizontal curve - bend left/right based on distance
-                const curveX = z * z * CONFIG.CURVE_STRENGTH;
-                pos.setX(i, x + curveX);
-                
-                // Also curve down slightly
-                const curveY = z * z * CONFIG.CURVE_DOWN * 0.1;
+                // Curve DOWN based on distance squared
+                const curveY = z * z * CONFIG.CURVE_STRENGTH;
                 pos.setY(i, curveY);
             }
         }
@@ -691,19 +719,16 @@ class BadrikRunner {
         
         const roadMat = new THREE.MeshStandardMaterial({ 
             map: roadTexture,
-            roughness: 0.9 
+            roughness: 0.8 
         });
         
-        // Create grass geometry (sides) - same curve
-        const grassGeo = new THREE.PlaneGeometry(20, CONFIG.GROUND_LENGTH, 10, 60);
+        // Create grass geometry (sides) - same DOWN curve
+        const grassGeo = new THREE.PlaneGeometry(15, CONFIG.GROUND_LENGTH, 1, 50);
         const grassPos = grassGeo.attributes.position;
         for (let i = 0; i < grassPos.count; i++) {
-            const x = grassPos.getX(i);
             const z = grassPos.getZ(i);
             if (z < 0) {
-                const curveX = z * z * CONFIG.CURVE_STRENGTH;
-                grassPos.setX(i, x + curveX);
-                const curveY = z * z * CONFIG.CURVE_DOWN * 0.1;
+                const curveY = z * z * CONFIG.CURVE_STRENGTH;
                 grassPos.setY(i, curveY);
             }
         }
@@ -711,15 +736,16 @@ class BadrikRunner {
         
         const grassMat = new THREE.MeshStandardMaterial({ 
             map: grassTexture,
-            roughness: 0.8 
+            roughness: 0.7 
         });
         
         for (let i = 0; i < CONFIG.GROUND_SEGMENTS; i++) {
+            const zPos = -i * CONFIG.GROUND_LENGTH + CONFIG.GROUND_LENGTH / 2;
+            
             // Road (center)
             const road = new THREE.Mesh(roadGeo.clone(), roadMat.clone());
             road.rotation.x = -Math.PI / 2;
-            road.position.z = -i * CONFIG.GROUND_LENGTH + CONFIG.GROUND_LENGTH / 2;
-            road.position.y = 0.01;
+            road.position.set(0, 0.01, zPos);
             road.receiveShadow = true;
             road.userData.type = 'ground';
             this.scene.add(road);
@@ -729,7 +755,7 @@ class BadrikRunner {
             // Grass left
             const grassL = new THREE.Mesh(grassGeo.clone(), grassMat.clone());
             grassL.rotation.x = -Math.PI / 2;
-            grassL.position.set(-13, 0, -i * CONFIG.GROUND_LENGTH + CONFIG.GROUND_LENGTH / 2);
+            grassL.position.set(-12.5, 0, zPos);
             grassL.receiveShadow = true;
             this.scene.add(grassL);
             
@@ -737,6 +763,8 @@ class BadrikRunner {
             const grassR = new THREE.Mesh(grassGeo.clone(), grassMat.clone());
             grassR.rotation.x = -Math.PI / 2;
             grassR.position.set(13, 0, -i * CONFIG.GROUND_LENGTH + CONFIG.GROUND_LENGTH / 2);
+            grassR.rotation.x = -Math.PI / 2;
+            grassR.position.set(12.5, 0, zPos);
             grassR.receiveShadow = true;
             this.scene.add(grassR);
         }
@@ -747,7 +775,7 @@ class BadrikRunner {
             const lineGeo = new THREE.PlaneGeometry(0.15, CONFIG.GROUND_LENGTH * CONFIG.GROUND_SEGMENTS);
             const line = new THREE.Mesh(lineGeo, lineMat);
             line.rotation.x = -Math.PI / 2;
-            line.position.set(x, 0.02, -CONFIG.GROUND_LENGTH * 2);
+            line.position.set(x, 0.03, -CONFIG.GROUND_LENGTH * 2);
             this.scene.add(line);
         });
         
@@ -1191,7 +1219,7 @@ class BadrikRunner {
     gameOver() {
         this.isPlaying = false;
         this.isGameOver = true;
-        this.sound.stopMusic(); // Stop music first
+        this.sound.stopAllMusic();
         
         // Play crash with slight delay so it's audible
         setTimeout(() => this.sound.play('crash'), 50);
@@ -1260,14 +1288,12 @@ class BadrikRunner {
             const obstacle = this.obstacles[i];
             obstacle.position.z += this.speed * delta;
             
-            // Apply curved world effect - horizontal curve
+            // Apply curved world effect - DOWN only (sync with road)
             const z = -obstacle.position.z;
             if (z > 0) {
-                // Horizontal curve (matches road)
-                const curveX = z * z * CONFIG.CURVE_STRENGTH;
-                obstacle.position.x = obstacle.userData.baseX + curveX;
-                // Vertical curve (slight down)
-                obstacle.position.y = obstacle.userData.baseY - (z * z * CONFIG.CURVE_DOWN * 0.1);
+                // Curve DOWN to match road curvature
+                const curveY = z * z * CONFIG.CURVE_STRENGTH;
+                obstacle.position.y = obstacle.userData.baseY - curveY;
             }
             
             if (obstacle.position.z > 20) {
@@ -1282,12 +1308,11 @@ class BadrikRunner {
             coin.position.z += this.speed * delta;
             coin.rotation.z += delta * 4;
             
-            // Apply curved world effect
+            // Apply curved world effect - DOWN only
             const z = -coin.position.z;
             if (z > 0) {
-                const curveX = z * z * CONFIG.CURVE_STRENGTH;
-                coin.position.x = coin.userData.baseX + curveX;
-                coin.position.y = coin.userData.baseY - (z * z * CONFIG.CURVE_DOWN * 0.1);
+                const curveY = z * z * CONFIG.CURVE_STRENGTH;
+                coin.position.y = coin.userData.baseY - curveY;
             }
             
             if (coin.position.z > 20) {
@@ -1301,12 +1326,11 @@ class BadrikRunner {
             const deco = this.decorations[i];
             deco.position.z += this.speed * delta;
             
-            // Apply curved world effect
+            // Apply curved world effect - DOWN only
             const z = -deco.position.z;
             if (z > 0) {
-                const curveX = z * z * CONFIG.CURVE_STRENGTH;
-                deco.position.x = deco.userData.baseX + curveX;
-                deco.position.y = deco.userData.baseY - (z * z * CONFIG.CURVE_DOWN * 0.1);
+                const curveY = z * z * CONFIG.CURVE_STRENGTH;
+                deco.position.y = deco.userData.baseY - curveY;
             }
             
             if (deco.position.z > 30) {
@@ -1315,25 +1339,25 @@ class BadrikRunner {
             }
         }
         
-        // Spawn new decorations - FURTHER away
+        // Spawn new decorations
         const lastDecoZ = this.decorations.length > 0 ?
             Math.min(...this.decorations.map(d => d.position.z)) : 0;
-        if (lastDecoZ > CONFIG.DECORATION_SPAWN_Z + 100) {
-            this.spawnDecoration(-8 - Math.random() * 3, lastDecoZ - 30 - Math.random() * 20);
-            this.spawnDecoration(8 + Math.random() * 3, lastDecoZ - 35 - Math.random() * 20);
+        if (lastDecoZ > CONFIG.DECORATION_SPAWN_Z + 50) {
+            this.spawnDecoration(-10 - Math.random() * 4, lastDecoZ - 25 - Math.random() * 15);
+            this.spawnDecoration(10 + Math.random() * 4, lastDecoZ - 30 - Math.random() * 15);
         }
         
-        // Spawn new obstacles - FURTHER away
+        // Spawn new obstacles
         const lastObsZ = this.obstacles.length > 0 ? 
             Math.min(...this.obstacles.map(o => o.position.z)) : 0;
-        if (lastObsZ > -CONFIG.OBSTACLE_SPAWN_DISTANCE + 20) {
+        if (lastObsZ > -CONFIG.OBSTACLE_SPAWN_DISTANCE + 30) {
             this.spawnObstacle();
         }
         
         // Spawn new coins
         const lastCoinZ = this.coinObjects.length > 0 ?
             Math.min(...this.coinObjects.map(c => c.position.z)) : 0;
-        if (lastCoinZ > -CONFIG.COIN_SPAWN_DISTANCE + 10) {
+        if (lastCoinZ > -CONFIG.COIN_SPAWN_DISTANCE + 20) {
             this.spawnCoinRow();
         }
         
