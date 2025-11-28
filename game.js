@@ -19,10 +19,10 @@ const CONFIG = {
     GRAVITY: -40,
     LANE_SWITCH_SPEED: 18,
     
-    OBSTACLE_SPAWN_DISTANCE: 50,
-    MIN_OBSTACLE_GAP: 25,
+    OBSTACLE_SPAWN_DISTANCE: 150,  // Much further away
+    MIN_OBSTACLE_GAP: 35,
     
-    COIN_SPAWN_DISTANCE: 30,
+    COIN_SPAWN_DISTANCE: 120,      // Much further away
     COIN_VALUE: 10,
     
     GROUND_LENGTH: 100,
@@ -34,11 +34,16 @@ const CONFIG = {
     SCRATCH_INTERVAL: 4000,
     SCRATCH_DURATION: 2000,
     
-    // Curved world - MUCH stronger curve
-    CURVE_STRENGTH: 0.025,
+    // Curved world - bends LEFT/RIGHT like Subway Surfers
+    CURVE_STRENGTH: 0.003,  // Horizontal curve amount
+    CURVE_DOWN: 0.015,      // Also curve down slightly
+    
+    // Spawn distances
+    SPAWN_START_Z: -250,    // Objects spawn far away near fog
+    DECORATION_SPAWN_Z: -350,
     
     // Biomes
-    BIOME_LENGTH: 1000, // meters per biome
+    BIOME_LENGTH: 1000,
 };
 
 // ==================== BIOMES ====================
@@ -531,8 +536,8 @@ class BadrikRunner {
         this.velocityY = 0;
         this.isJumping = false;
         this.isSliding = false;
-        this.lastObstacleZ = -30;
-        this.lastCoinZ = -20;
+        this.lastObstacleZ = CONFIG.SPAWN_START_Z;
+        this.lastCoinZ = CONFIG.SPAWN_START_Z;
         this.obstacles = [];
         this.coinObjects = [];
         
@@ -577,9 +582,9 @@ class BadrikRunner {
         this.isSliding = false;
         this.isGameOver = false;
         this.isPlaying = true;
-        this.lastObstacleZ = -30;
-        this.lastCoinZ = -20;
-        this.lastDecorationZ = -20;
+        this.lastObstacleZ = CONFIG.SPAWN_START_Z;
+        this.lastCoinZ = CONFIG.SPAWN_START_Z;
+        this.lastDecorationZ = CONFIG.DECORATION_SPAWN_Z;
         
         // Reset biome to park
         this.currentBiome = 'park';
@@ -664,16 +669,22 @@ class BadrikRunner {
         grassTexture.wrapT = THREE.RepeatWrapping;
         grassTexture.repeat.set(4, 10);
         
-        // Create curved road geometry (center)
-        const roadGeo = new THREE.PlaneGeometry(12, CONFIG.GROUND_LENGTH, 1, 40);
+        // Create curved road geometry (center) - curves LEFT/RIGHT
+        const roadGeo = new THREE.PlaneGeometry(12, CONFIG.GROUND_LENGTH, 20, 60);
         
-        // Bend the road - curve down at distance
+        // Bend the road horizontally (left/right curve) + slightly down
         const pos = roadGeo.attributes.position;
         for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i);
             const z = pos.getZ(i);
             if (z < 0) {
-                const curve = z * z * CONFIG.CURVE_STRENGTH * 0.3;
-                pos.setY(i, curve);
+                // Horizontal curve - bend left/right based on distance
+                const curveX = z * z * CONFIG.CURVE_STRENGTH;
+                pos.setX(i, x + curveX);
+                
+                // Also curve down slightly
+                const curveY = z * z * CONFIG.CURVE_DOWN * 0.1;
+                pos.setY(i, curveY);
             }
         }
         roadGeo.computeVertexNormals();
@@ -683,14 +694,17 @@ class BadrikRunner {
             roughness: 0.9 
         });
         
-        // Create grass geometry (sides)
-        const grassGeo = new THREE.PlaneGeometry(14, CONFIG.GROUND_LENGTH, 1, 40);
+        // Create grass geometry (sides) - same curve
+        const grassGeo = new THREE.PlaneGeometry(20, CONFIG.GROUND_LENGTH, 10, 60);
         const grassPos = grassGeo.attributes.position;
         for (let i = 0; i < grassPos.count; i++) {
+            const x = grassPos.getX(i);
             const z = grassPos.getZ(i);
             if (z < 0) {
-                const curve = z * z * CONFIG.CURVE_STRENGTH * 0.3;
-                grassPos.setY(i, curve);
+                const curveX = z * z * CONFIG.CURVE_STRENGTH;
+                grassPos.setX(i, x + curveX);
+                const curveY = z * z * CONFIG.CURVE_DOWN * 0.1;
+                grassPos.setY(i, curveY);
             }
         }
         grassGeo.computeVertexNormals();
@@ -801,12 +815,12 @@ class BadrikRunner {
     spawnDecorations() {
         const biome = BIOMES[this.currentBiome];
         
-        // Spawn decorations on both sides
-        for (let i = 0; i < 10; i++) {
-            this.spawnDecoration(-8 - Math.random() * 3, -i * 30 - Math.random() * 20);
-            this.spawnDecoration(8 + Math.random() * 3, -i * 30 - Math.random() * 20);
+        // Spawn decorations on both sides - FURTHER away
+        for (let i = 0; i < 15; i++) {
+            this.spawnDecoration(-10 - Math.random() * 4, -i * 25 - Math.random() * 15 - 50);
+            this.spawnDecoration(10 + Math.random() * 4, -i * 25 - Math.random() * 15 - 50);
         }
-        this.lastDecorationZ = -300;
+        this.lastDecorationZ = CONFIG.DECORATION_SPAWN_Z;
     }
     
     spawnDecoration(x, z) {
@@ -828,7 +842,7 @@ class BadrikRunner {
                 const tree = new THREE.Mesh(geometry, material);
                 tree.position.set(x, yPos, z);
                 tree.scale.y = scaleY;
-                tree.userData.type = 'decoration';
+                tree.userData = { type: 'decoration', baseX: x, baseY: yPos };
                 this.scene.add(tree);
                 this.decorations.push(tree);
                 
@@ -836,8 +850,9 @@ class BadrikRunner {
                 const topGeo = new THREE.SphereGeometry(2, 8, 6);
                 const topMat = new THREE.MeshStandardMaterial({ color: biome.decorColor1 });
                 const top = new THREE.Mesh(topGeo, topMat);
-                top.position.set(x, 5 + scaleY, z);
-                top.userData.type = 'decoration';
+                const topY = 5 + scaleY;
+                top.position.set(x, topY, z);
+                top.userData = { type: 'decoration', baseX: x, baseY: topY };
                 this.scene.add(top);
                 this.decorations.push(top);
             } else {
@@ -879,7 +894,7 @@ class BadrikRunner {
             const deco = new THREE.Mesh(geometry, material);
             deco.position.set(x, yPos, z);
             deco.castShadow = true;
-            deco.userData.type = 'decoration';
+            deco.userData = { type: 'decoration', baseX: x, baseY: yPos };
             this.scene.add(deco);
             this.decorations.push(deco);
         }
@@ -1050,14 +1065,15 @@ class BadrikRunner {
         }
         
         const obstacle = new THREE.Mesh(geometry, material);
-        obstacle.position.set(x, yPos, this.lastObstacleZ - CONFIG.OBSTACLE_SPAWN_DISTANCE);
+        const spawnZ = this.lastObstacleZ - CONFIG.OBSTACLE_SPAWN_DISTANCE;
+        obstacle.position.set(x, yPos, spawnZ);
         obstacle.castShadow = true;
         obstacle.receiveShadow = true;
-        obstacle.userData = { type: 'obstacle', obstacleType: type, baseY: yPos };
+        obstacle.userData = { type: 'obstacle', obstacleType: type, baseX: x, baseY: yPos };
         
         this.scene.add(obstacle);
         this.obstacles.push(obstacle);
-        this.lastObstacleZ = obstacle.position.z;
+        this.lastObstacleZ = spawnZ;
     }
     
     // ==================== COINS (BONES) ====================
@@ -1092,7 +1108,7 @@ class BadrikRunner {
                 coin.rotation.y = Math.PI / 2;
             }
             
-            coin.userData = { type: 'coin', baseY: yPos };
+            coin.userData = { type: 'coin', baseX: x, baseY: yPos };
             this.scene.add(coin);
             this.coinObjects.push(coin);
         }
@@ -1239,15 +1255,19 @@ class BadrikRunner {
             }
         }
         
-        // Move obstacles with curved world
+        // Move obstacles with curved world (LEFT/RIGHT + down)
         for (let i = this.obstacles.length - 1; i >= 0; i--) {
             const obstacle = this.obstacles[i];
             obstacle.position.z += this.speed * delta;
             
-            // Apply curved world effect
+            // Apply curved world effect - horizontal curve
             const z = -obstacle.position.z;
             if (z > 0) {
-                obstacle.position.y = obstacle.userData.baseY - (z * z * CONFIG.CURVE_STRENGTH);
+                // Horizontal curve (matches road)
+                const curveX = z * z * CONFIG.CURVE_STRENGTH;
+                obstacle.position.x = obstacle.userData.baseX + curveX;
+                // Vertical curve (slight down)
+                obstacle.position.y = obstacle.userData.baseY - (z * z * CONFIG.CURVE_DOWN * 0.1);
             }
             
             if (obstacle.position.z > 20) {
@@ -1265,7 +1285,9 @@ class BadrikRunner {
             // Apply curved world effect
             const z = -coin.position.z;
             if (z > 0) {
-                coin.position.y = coin.userData.baseY - (z * z * CONFIG.CURVE_STRENGTH);
+                const curveX = z * z * CONFIG.CURVE_STRENGTH;
+                coin.position.x = coin.userData.baseX + curveX;
+                coin.position.y = coin.userData.baseY - (z * z * CONFIG.CURVE_DOWN * 0.1);
             }
             
             if (coin.position.z > 20) {
@@ -1282,9 +1304,9 @@ class BadrikRunner {
             // Apply curved world effect
             const z = -deco.position.z;
             if (z > 0) {
-                const baseY = deco.userData.baseY || deco.position.y;
-                if (!deco.userData.baseY) deco.userData.baseY = baseY;
-                deco.position.y = baseY - (z * z * CONFIG.CURVE_STRENGTH);
+                const curveX = z * z * CONFIG.CURVE_STRENGTH;
+                deco.position.x = deco.userData.baseX + curveX;
+                deco.position.y = deco.userData.baseY - (z * z * CONFIG.CURVE_DOWN * 0.1);
             }
             
             if (deco.position.z > 30) {
@@ -1293,15 +1315,15 @@ class BadrikRunner {
             }
         }
         
-        // Spawn new decorations
+        // Spawn new decorations - FURTHER away
         const lastDecoZ = this.decorations.length > 0 ?
             Math.min(...this.decorations.map(d => d.position.z)) : 0;
-        if (lastDecoZ > -200) {
-            this.spawnDecoration(-8 - Math.random() * 3, lastDecoZ - 20 - Math.random() * 10);
-            this.spawnDecoration(8 + Math.random() * 3, lastDecoZ - 25 - Math.random() * 10);
+        if (lastDecoZ > CONFIG.DECORATION_SPAWN_Z + 100) {
+            this.spawnDecoration(-8 - Math.random() * 3, lastDecoZ - 30 - Math.random() * 20);
+            this.spawnDecoration(8 + Math.random() * 3, lastDecoZ - 35 - Math.random() * 20);
         }
         
-        // Spawn new obstacles
+        // Spawn new obstacles - FURTHER away
         const lastObsZ = this.obstacles.length > 0 ? 
             Math.min(...this.obstacles.map(o => o.position.z)) : 0;
         if (lastObsZ > -CONFIG.OBSTACLE_SPAWN_DISTANCE + 20) {
