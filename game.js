@@ -653,35 +653,78 @@ class BadrikRunner {
     createWorld() {
         const biome = BIOMES[this.currentBiome];
         
-        // Create curved ground geometry
-        const groundGeo = new THREE.PlaneGeometry(40, CONFIG.GROUND_LENGTH, 1, 40);
+        // Load textures
+        const roadTexture = this.textureLoader.load('road.png');
+        roadTexture.wrapS = THREE.RepeatWrapping;
+        roadTexture.wrapT = THREE.RepeatWrapping;
+        roadTexture.repeat.set(2, 10);
         
-        // Bend the ground - curve down at distance
-        const pos = groundGeo.attributes.position;
+        const grassTexture = this.textureLoader.load('grass (1).png');
+        grassTexture.wrapS = THREE.RepeatWrapping;
+        grassTexture.wrapT = THREE.RepeatWrapping;
+        grassTexture.repeat.set(4, 10);
+        
+        // Create curved road geometry (center)
+        const roadGeo = new THREE.PlaneGeometry(12, CONFIG.GROUND_LENGTH, 1, 40);
+        
+        // Bend the road - curve down at distance
+        const pos = roadGeo.attributes.position;
         for (let i = 0; i < pos.count; i++) {
             const z = pos.getZ(i);
             if (z < 0) {
-                // Curve down based on distance squared
                 const curve = z * z * CONFIG.CURVE_STRENGTH * 0.3;
-                pos.setY(i, curve); // Negative because plane is rotated
+                pos.setY(i, curve);
             }
         }
-        groundGeo.computeVertexNormals();
+        roadGeo.computeVertexNormals();
         
-        const groundMat = new THREE.MeshStandardMaterial({ 
-            color: biome.groundColor, 
+        const roadMat = new THREE.MeshStandardMaterial({ 
+            map: roadTexture,
+            roughness: 0.9 
+        });
+        
+        // Create grass geometry (sides)
+        const grassGeo = new THREE.PlaneGeometry(14, CONFIG.GROUND_LENGTH, 1, 40);
+        const grassPos = grassGeo.attributes.position;
+        for (let i = 0; i < grassPos.count; i++) {
+            const z = grassPos.getZ(i);
+            if (z < 0) {
+                const curve = z * z * CONFIG.CURVE_STRENGTH * 0.3;
+                grassPos.setY(i, curve);
+            }
+        }
+        grassGeo.computeVertexNormals();
+        
+        const grassMat = new THREE.MeshStandardMaterial({ 
+            map: grassTexture,
             roughness: 0.8 
         });
         
         for (let i = 0; i < CONFIG.GROUND_SEGMENTS; i++) {
-            const ground = new THREE.Mesh(groundGeo.clone(), groundMat.clone());
-            ground.rotation.x = -Math.PI / 2;
-            ground.position.z = -i * CONFIG.GROUND_LENGTH + CONFIG.GROUND_LENGTH / 2;
-            ground.receiveShadow = true;
-            ground.userData.type = 'ground';
-            this.scene.add(ground);
-            this.grounds.push(ground);
-            this.biomeObjects.push(ground);
+            // Road (center)
+            const road = new THREE.Mesh(roadGeo.clone(), roadMat.clone());
+            road.rotation.x = -Math.PI / 2;
+            road.position.z = -i * CONFIG.GROUND_LENGTH + CONFIG.GROUND_LENGTH / 2;
+            road.position.y = 0.01;
+            road.receiveShadow = true;
+            road.userData.type = 'ground';
+            this.scene.add(road);
+            this.grounds.push(road);
+            this.biomeObjects.push(road);
+            
+            // Grass left
+            const grassL = new THREE.Mesh(grassGeo.clone(), grassMat.clone());
+            grassL.rotation.x = -Math.PI / 2;
+            grassL.position.set(-13, 0, -i * CONFIG.GROUND_LENGTH + CONFIG.GROUND_LENGTH / 2);
+            grassL.receiveShadow = true;
+            this.scene.add(grassL);
+            
+            // Grass right
+            const grassR = new THREE.Mesh(grassGeo.clone(), grassMat.clone());
+            grassR.rotation.x = -Math.PI / 2;
+            grassR.position.set(13, 0, -i * CONFIG.GROUND_LENGTH + CONFIG.GROUND_LENGTH / 2);
+            grassR.receiveShadow = true;
+            this.scene.add(grassR);
         }
         
         // Lane lines
