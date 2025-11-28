@@ -19,10 +19,11 @@ const CONFIG = {
     GRAVITY: -40,
     LANE_SWITCH_SPEED: 18,
     
-    OBSTACLE_SPAWN_DISTANCE: 120,
-    MIN_OBSTACLE_GAP: 30,
+    // More obstacles and coins!
+    OBSTACLE_SPAWN_DISTANCE: 35,
+    MIN_OBSTACLE_GAP: 18,
     
-    COIN_SPAWN_DISTANCE: 100,
+    COIN_SPAWN_DISTANCE: 25,
     COIN_VALUE: 10,
     
     GROUND_LENGTH: 100,
@@ -34,16 +35,20 @@ const CONFIG = {
     SCRATCH_INTERVAL: 4000,
     SCRATCH_DURATION: 2000,
     
-    // Curved world - bends DOWN like Subway Surfers (NOT left/right!)
-    CURVE_STRENGTH: 0.0004,  // How much road curves down
+    // Curved world - bends DOWN like Subway Surfers
+    CURVE_STRENGTH: 0.0004,
     
     // Spawn distances
-    SPAWN_START_Z: -200,
-    DECORATION_SPAWN_Z: -300,
+    SPAWN_START_Z: -180,
+    DECORATION_SPAWN_Z: -250,
     
     // Fog
     FOG_NEAR: 50,
     FOG_FAR: 250,
+    
+    // Two-level system (run on top of obstacles)
+    GROUND_LEVEL: 0,
+    TOP_LEVEL: 4,  // Height of obstacle tops
     
     // Biomes
     BIOME_LENGTH: 1000,
@@ -300,10 +305,14 @@ class BadrikRunner {
         
         // Biomes
         this.currentBiome = 'park';
-        this.biomeObjects = []; // Objects to update on biome change
+        this.biomeObjects = [];
         
         // 3D Models
         this.boneModel = null;
+        
+        // Particles
+        this.particles = [];
+        this.dustParticles = null;
         
         // Textures
         this.textures = {};
@@ -1052,13 +1061,12 @@ class BadrikRunner {
         const lane = Math.floor(Math.random() * 3);
         const x = CONFIG.LANES[lane];
         
-        // 3 types: normal, tall, low (for sliding)
-        const types = ['normal', 'normal', 'tall', 'low'];
+        // 4 types: normal, tall, low, platform (can run on top)
+        const types = ['normal', 'normal', 'tall', 'low', 'platform'];
         const type = types[Math.floor(Math.random() * types.length)];
         
         let geometry, material, yPos;
         
-        // Obstacles scaled up for bigger dog
         switch(type) {
             case 'normal':
                 geometry = new THREE.BoxGeometry(3, 4, 3);
@@ -1081,14 +1089,24 @@ class BadrikRunner {
                 break;
                 
             case 'low':
-                // LOW obstacle - MUST slide under!
                 geometry = new THREE.BoxGeometry(4, 2.5, 4);
                 material = new THREE.MeshStandardMaterial({
                     color: 0x00ff88,
                     emissive: 0x00aa44,
                     emissiveIntensity: 0.4
                 });
-                yPos = 4; // Floating - player slides under
+                yPos = 4;
+                break;
+                
+            case 'platform':
+                // Long platform - can run on top!
+                geometry = new THREE.BoxGeometry(3, 4, 15);
+                material = new THREE.MeshStandardMaterial({
+                    color: 0x8844ff,
+                    emissive: 0x4422aa,
+                    emissiveIntensity: 0.4
+                });
+                yPos = 2;
                 break;
         }
         
@@ -1108,32 +1126,49 @@ class BadrikRunner {
     spawnCoinRow() {
         const lane = Math.floor(Math.random() * 3);
         const x = CONFIG.LANES[lane];
-        const count = 3 + Math.floor(Math.random() * 4);
+        const count = 4 + Math.floor(Math.random() * 5); // More bones!
+        
+        // Sometimes spawn on top level (above obstacles)
+        const onTop = Math.random() > 0.7;
+        const baseY = onTop ? CONFIG.TOP_LEVEL + 2 : 2;
         
         for (let i = 0; i < count; i++) {
             let coin;
-            const zPos = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - i * 4;
-            const yPos = 2.5;
+            const zPos = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - i * 3;
+            const yPos = baseY + Math.sin(i * 0.5) * 0.5; // Wavy pattern
             
             if (this.boneModel) {
-                // Use 3D bone model
+                // Use 3D bone model - smaller and glowing
                 coin = this.boneModel.clone();
-                coin.scale.set(2, 2, 2);
+                coin.scale.set(1.2, 1.2, 1.2); // Smaller
                 coin.position.set(x, yPos, zPos);
-                coin.rotation.set(0, Math.PI / 2, Math.PI / 2); // Horizontal bone
+                // Different rotation - diagonal spin
+                coin.rotation.set(Math.PI / 4, 0, 0);
+                
+                // Add glow effect
+                coin.traverse(child => {
+                    if (child.isMesh) {
+                        child.material = new THREE.MeshStandardMaterial({
+                            color: 0xffd700,
+                            emissive: 0xffaa00,
+                            emissiveIntensity: 0.8,
+                            metalness: 0.9,
+                            roughness: 0.2
+                        });
+                    }
+                });
             } else {
-                // Fallback to torus
-                const coinGeo = new THREE.TorusGeometry(0.8, 0.25, 12, 24);
+                // Fallback - glowing torus
+                const coinGeo = new THREE.TorusGeometry(0.5, 0.15, 12, 24);
                 const coinMat = new THREE.MeshStandardMaterial({
                     color: 0xffd700,
                     emissive: 0xffaa00,
-                    emissiveIntensity: 0.6,
+                    emissiveIntensity: 0.9,
                     metalness: 0.9,
                     roughness: 0.1
                 });
                 coin = new THREE.Mesh(coinGeo, coinMat);
                 coin.position.set(x, yPos, zPos);
-                coin.rotation.y = Math.PI / 2;
             }
             
             coin.userData = { type: 'coin', baseX: x, baseY: yPos };
@@ -1141,7 +1176,59 @@ class BadrikRunner {
             this.coinObjects.push(coin);
         }
         
-        this.lastCoinZ = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - count * 4;
+        this.lastCoinZ = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - count * 3;
+    }
+    
+    // Spawn particle effect when collecting bone
+    spawnCollectParticles(position) {
+        const particleCount = 8;
+        for (let i = 0; i < particleCount; i++) {
+            const geo = new THREE.SphereGeometry(0.15, 6, 6);
+            const mat = new THREE.MeshBasicMaterial({
+                color: 0xffd700,
+                transparent: true,
+                opacity: 1
+            });
+            const particle = new THREE.Mesh(geo, mat);
+            particle.position.copy(position);
+            
+            // Random velocity
+            particle.userData = {
+                vx: (Math.random() - 0.5) * 8,
+                vy: Math.random() * 6 + 2,
+                vz: (Math.random() - 0.5) * 8,
+                life: 1.0
+            };
+            
+            this.scene.add(particle);
+            this.particles.push(particle);
+        }
+    }
+    
+    // Update particles
+    updateParticles(delta) {
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
+            const d = p.userData;
+            
+            // Move
+            p.position.x += d.vx * delta;
+            p.position.y += d.vy * delta;
+            p.position.z += d.vz * delta;
+            
+            // Gravity
+            d.vy -= 15 * delta;
+            
+            // Fade
+            d.life -= delta * 2;
+            p.material.opacity = d.life;
+            
+            // Remove dead particles
+            if (d.life <= 0) {
+                this.scene.remove(p);
+                this.particles.splice(i, 1);
+            }
+        }
     }
 
 
@@ -1162,15 +1249,37 @@ class BadrikRunner {
             const oy = obstacle.position.y;
             const oz = obstacle.position.z;
             const oType = obstacle.userData.obstacleType;
+            const oHeight = oType === 'tall' ? 10 : 4;
+            const oLength = oType === 'platform' ? 15 : 3;
             
             // Distance check
-            if (Math.abs(oz - playerZ) > 4) continue;
+            if (Math.abs(oz - playerZ) > oLength / 2 + 2) continue;
             if (Math.abs(ox - playerX) > 3) continue;
             
             // In same lane
             if (Math.abs(ox - playerX) < 2.5) {
                 // Z overlap
-                if (oz > playerZ - 2 && oz < playerZ + 2) {
+                const zOverlap = oz > playerZ - oLength / 2 - 1 && oz < playerZ + oLength / 2 + 1;
+                
+                if (zOverlap) {
+                    // Platform - can run on top!
+                    if (oType === 'platform' || oType === 'normal') {
+                        const topY = oy + oHeight / 2;
+                        // If player is above, land on top
+                        if (playerY >= topY - 0.5 && this.velocityY <= 0) {
+                            this.dog.position.y = topY;
+                            this.velocityY = 0;
+                            this.isJumping = false;
+                            if (!this.isSliding) this.playAnimation('run');
+                            continue;
+                        }
+                        // If player hits side, game over
+                        if (playerY < topY - 1) {
+                            this.gameOver();
+                            return;
+                        }
+                        continue;
+                    }
                     
                     // Low obstacle - can slide under
                     if (oType === 'low') {
@@ -1178,17 +1287,11 @@ class BadrikRunner {
                             this.gameOver();
                             return;
                         }
-                        continue; // Safe if sliding
+                        continue;
                     }
                     
                     // Tall obstacle - must dodge
                     if (oType === 'tall') {
-                        this.gameOver();
-                        return;
-                    }
-                    
-                    // Normal obstacle - can jump over
-                    if (playerY < 3) {
                         this.gameOver();
                         return;
                     }
@@ -1200,12 +1303,17 @@ class BadrikRunner {
         for (let i = this.coinObjects.length - 1; i >= 0; i--) {
             const coin = this.coinObjects[i];
             const cx = coin.position.x;
+            const cy = coin.position.y;
             const cz = coin.position.z;
             
             const distX = Math.abs(cx - playerX);
+            const distY = Math.abs(cy - playerY - 2); // Center of dog
             const distZ = Math.abs(cz - playerZ);
             
-            if (distX < 2 && distZ < 2) {
+            if (distX < 2 && distZ < 2 && distY < 3) {
+                // Spawn particles at coin position
+                this.spawnCollectParticles(coin.position.clone());
+                
                 this.scene.remove(coin);
                 this.coinObjects.splice(i, 1);
                 this.coins++;
@@ -1302,11 +1410,15 @@ class BadrikRunner {
             }
         }
         
-        // Move coins with curved world
+        // Move coins with curved world + spin animation
         for (let i = this.coinObjects.length - 1; i >= 0; i--) {
             const coin = this.coinObjects[i];
             coin.position.z += this.speed * delta;
-            coin.rotation.z += delta * 4;
+            
+            // Spin on Y axis (like a coin spinning)
+            coin.rotation.y += delta * 5;
+            // Slight wobble
+            coin.rotation.x = Math.PI / 4 + Math.sin(Date.now() * 0.005 + i) * 0.1;
             
             // Apply curved world effect - DOWN only
             const z = -coin.position.z;
@@ -1320,6 +1432,9 @@ class BadrikRunner {
                 this.coinObjects.splice(i, 1);
             }
         }
+        
+        // Update particles
+        this.updateParticles(delta);
         
         // Move decorations with curved world
         for (let i = this.decorations.length - 1; i >= 0; i--) {
