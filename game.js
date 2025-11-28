@@ -226,6 +226,7 @@ class Game {
         this.dog = null;
         this.mixer = null;
         this.animations = {};
+        this.menuAnimations = {};
         this.currentLane = 1;
         this.targetX = 0;
         this.velocityY = 0;
@@ -326,6 +327,7 @@ class Game {
             if (gltf.animations.length > 0) {
                 this.menuMixer = new THREE.AnimationMixer(this.menuDog);
                 gltf.animations.forEach(clip => {
+                    console.log('Menu animation found:', clip.name);
                     this.menuAnimations[clip.name.toLowerCase()] = this.menuMixer.clipAction(clip);
                 });
                 // Start with sit animation
