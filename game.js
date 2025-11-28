@@ -34,8 +34,8 @@ const CONFIG = {
     SCRATCH_INTERVAL: 4000,
     SCRATCH_DURATION: 2000,
     
-    // Curved world
-    CURVE_STRENGTH: 0.008,
+    // Curved world - MUCH stronger curve
+    CURVE_STRENGTH: 0.025,
     
     // Biomes
     BIOME_LENGTH: 1000, // meters per biome
@@ -266,6 +266,9 @@ class BadrikRunner {
         this.currentBiome = 'park';
         this.biomeObjects = []; // Objects to update on biome change
         
+        // 3D Models
+        this.boneModel = null;
+        
         // Textures
         this.textures = {};
         this.textureMap = {
@@ -290,6 +293,12 @@ class BadrikRunner {
             tex.colorSpace = THREE.SRGBColorSpace;
             this.textures[key] = tex;
         }
+        
+        // Load bone model
+        this.loader.load('Cartoon_dog_bone_gol_1128113819_texture.glb', (gltf) => {
+            this.boneModel = gltf.scene;
+            console.log('🦴 Bone model loaded!');
+        });
         
         this.initMenuScene();
         this.initUI();
@@ -644,8 +653,21 @@ class BadrikRunner {
     createWorld() {
         const biome = BIOMES[this.currentBiome];
         
-        // Ground with biome color
-        const groundGeo = new THREE.PlaneGeometry(40, CONFIG.GROUND_LENGTH, 1, 20);
+        // Create curved ground geometry
+        const groundGeo = new THREE.PlaneGeometry(40, CONFIG.GROUND_LENGTH, 1, 40);
+        
+        // Bend the ground - curve down at distance
+        const pos = groundGeo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            const z = pos.getZ(i);
+            if (z < 0) {
+                // Curve down based on distance squared
+                const curve = z * z * CONFIG.CURVE_STRENGTH * 0.3;
+                pos.setY(i, curve); // Negative because plane is rotated
+            }
+        }
+        groundGeo.computeVertexNormals();
+        
         const groundMat = new THREE.MeshStandardMaterial({ 
             color: biome.groundColor, 
             roughness: 0.8 
@@ -995,29 +1017,39 @@ class BadrikRunner {
         this.lastObstacleZ = obstacle.position.z;
     }
     
-    // ==================== COINS ====================
+    // ==================== COINS (BONES) ====================
     spawnCoinRow() {
         const lane = Math.floor(Math.random() * 3);
         const x = CONFIG.LANES[lane];
         const count = 3 + Math.floor(Math.random() * 4);
         
         for (let i = 0; i < count; i++) {
-            // Bigger coins for bigger dog
-            const coinGeo = new THREE.TorusGeometry(0.8, 0.25, 12, 24);
-            const coinMat = new THREE.MeshStandardMaterial({
-                color: 0xffd700,
-                emissive: 0xffaa00,
-                emissiveIntensity: 0.6,
-                metalness: 0.9,
-                roughness: 0.1
-            });
+            let coin;
+            const zPos = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - i * 4;
+            const yPos = 2.5;
             
-            const coin = new THREE.Mesh(coinGeo, coinMat);
-            coin.position.set(x, 2.5, this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - i * 4);
-            // Standing vertical, facing player
-            coin.rotation.y = Math.PI / 2;
-            coin.userData = { type: 'coin', baseY: 2.5 };
+            if (this.boneModel) {
+                // Use 3D bone model
+                coin = this.boneModel.clone();
+                coin.scale.set(2, 2, 2);
+                coin.position.set(x, yPos, zPos);
+                coin.rotation.set(0, Math.PI / 2, Math.PI / 2); // Horizontal bone
+            } else {
+                // Fallback to torus
+                const coinGeo = new THREE.TorusGeometry(0.8, 0.25, 12, 24);
+                const coinMat = new THREE.MeshStandardMaterial({
+                    color: 0xffd700,
+                    emissive: 0xffaa00,
+                    emissiveIntensity: 0.6,
+                    metalness: 0.9,
+                    roughness: 0.1
+                });
+                coin = new THREE.Mesh(coinGeo, coinMat);
+                coin.position.set(x, yPos, zPos);
+                coin.rotation.y = Math.PI / 2;
+            }
             
+            coin.userData = { type: 'coin', baseY: yPos };
             this.scene.add(coin);
             this.coinObjects.push(coin);
         }
