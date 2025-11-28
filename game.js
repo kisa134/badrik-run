@@ -1,6 +1,6 @@
 /**
- * BADRIK RUN - Subway Surfer Style Runner
- * Collect bones, avoid obstacles, earn $BADRIK tokens!
+ * BADRIK RUN - Subway Surfer Style Runner v1.1
+ * With sounds, proper animations, slide mechanic
  */
 
 import * as THREE from 'three';
@@ -8,35 +8,66 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // ==================== GAME CONFIG ====================
 const CONFIG = {
-    // Lanes
     LANE_WIDTH: 2.5,
-    LANES: [-2.5, 0, 2.5], // Left, Center, Right
+    LANES: [-2.5, 0, 2.5],
     
-    // Speed
     INITIAL_SPEED: 15,
     MAX_SPEED: 35,
-    SPEED_INCREASE: 0.5, // per second
+    SPEED_INCREASE: 0.3,
     
-    // Player
     JUMP_FORCE: 12,
     GRAVITY: -35,
-    LANE_SWITCH_SPEED: 12,
+    LANE_SWITCH_SPEED: 15,
     
-    // Obstacles
-    OBSTACLE_SPAWN_DISTANCE: 80,
-    MIN_OBSTACLE_GAP: 15,
+    OBSTACLE_SPAWN_DISTANCE: 60,
+    MIN_OBSTACLE_GAP: 20,
     
-    // Coins (bones)
-    COIN_SPAWN_DISTANCE: 60,
+    COIN_SPAWN_DISTANCE: 40,
     COIN_VALUE: 10,
     
-    // Scoring
     DISTANCE_MULTIPLIER: 1,
     
-    // World
     GROUND_LENGTH: 200,
     GROUND_SEGMENTS: 4,
+    
+    SLIDE_DURATION: 600,
 };
+
+// ==================== SOUND MANAGER ====================
+class SoundManager {
+    constructor() {
+        this.sounds = {};
+        this.enabled = true;
+        this.loaded = false;
+    }
+    
+    async load() {
+        const soundFiles = {
+            coin: 'Pick Up/Etherealchimewith13.mp3',
+            crash: 'Destruction/Destructionsoundsw5.mp3',
+            jump: 'Drop/BouncyRubberBall6.mp3',
+            slide: 'Drag/Acontinuoussoundr1.mp3',
+            button: 'Inventory/ItemMoveSelectSoft5.mp3',
+        };
+        
+        for (const [name, path] of Object.entries(soundFiles)) {
+            try {
+                const audio = new Audio(path);
+                audio.volume = name === 'coin' ? 0.3 : 0.5;
+                this.sounds[name] = audio;
+            } catch (e) {
+                console.warn(`Failed to load sound: ${path}`);
+            }
+        }
+        this.loaded = true;
+    }
+    
+    play(name) {
+        if (!this.enabled || !this.sounds[name]) return;
+        const sound = this.sounds[name].cloneNode();
+        sound.play().catch(() => {});
+    }
+}
 
 
 // ==================== WALLET MANAGER ====================
@@ -49,7 +80,6 @@ class WalletManager {
     
     async connect() {
         try {
-            // Check if Phantom is installed
             if (!window.solana || !window.solana.isPhantom) {
                 window.open('https://phantom.app/', '_blank');
                 return false;
@@ -59,7 +89,6 @@ class WalletManager {
             const response = await this.provider.connect();
             this.address = response.publicKey.toString();
             this.connected = true;
-            
             return true;
         } catch (error) {
             console.error('Wallet connection failed:', error);
@@ -85,20 +114,58 @@ class WalletManager {
     }
 }
 
+// ==================== BACKEND API ====================
+const API_URL = 'https://badrik-api.onrender.com'; // Will be deployed
+
+class GameAPI {
+    static async submitScore(wallet, score, coins, distance, signature) {
+        try {
+            const response = await fetch(`${API_URL}/api/score`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ wallet, score, coins, distance, signature })
+            });
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to submit score:', error);
+            return null;
+        }
+    }
+    
+    static async getLeaderboard(limit = 10) {
+        try {
+            const response = await fetch(`${API_URL}/api/leaderboard?limit=${limit}`);
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to fetch leaderboard:', error);
+            return [];
+        }
+    }
+    
+    static async getPlayerRank(wallet) {
+        try {
+            const response = await fetch(`${API_URL}/api/rank/${wallet}`);
+            return await response.json();
+        } catch (error) {
+            return { rank: null, bestScore: 0 };
+        }
+    }
+}
+
 
 // ==================== MAIN GAME CLASS ====================
 class BadrikRunner {
     constructor() {
-        // Managers
         this.wallet = new WalletManager();
+        this.sound = new SoundManager();
         this.textureLoader = new THREE.TextureLoader();
         this.loader = new GLTFLoader();
         
-        // Game state
+        // State
         this.isPlaying = false;
-        this.isPaused = false;
         this.isGameOver = false;
         this.selectedSkin = 'white';
+        this.isInMenu = true;
         
         // Score
         this.score = 0;
@@ -112,23 +179,26 @@ class BadrikRunner {
         this.renderer = null;
         this.clock = new THREE.Clock();
         
-        // Menu scene
+        // Menu
         this.menuScene = null;
         this.menuCamera = null;
         this.menuRenderer = null;
         this.menuDog = null;
         this.menuMixer = null;
-        this.isInMenu = true;
         
         // Player
         this.dog = null;
         this.mixer = null;
         this.animations = {};
-        this.currentLane = 1; // 0=left, 1=center, 2=right
+        this.currentAnimName = '';
+        this.currentLane = 1;
         this.targetX = 0;
         this.velocityY = 0;
         this.isJumping = false;
         this.isSliding = false;
+        this.slideTimer = 0;
+        this.normalScale = new THREE.Vector3(1, 1, 1);
+        this.slideScale = new THREE.Vector3(1, 0.5, 1);
         
         // World
         this.speed = CONFIG.INITIAL_SPEED;
@@ -151,18 +221,15 @@ class BadrikRunner {
         this.touchStartY = 0;
         
         // Referral
-        this.referralCode = this.getReferralFromURL();
+        this.referralCode = new URLSearchParams(window.location.search).get('ref');
         
         this.init();
     }
-
-
-    getReferralFromURL() {
-        const params = new URLSearchParams(window.location.search);
-        return params.get('ref');
-    }
     
-    init() {
+    async init() {
+        // Load sounds
+        await this.sound.load();
+        
         // Preload textures
         for (const [key, path] of Object.entries(this.textureMap)) {
             const tex = this.textureLoader.load(path);
@@ -175,7 +242,8 @@ class BadrikRunner {
         this.initUI();
         this.animateMenu();
     }
-    
+
+
     // ==================== MENU ====================
     initMenuScene() {
         this.menuScene = new THREE.Scene();
@@ -195,18 +263,11 @@ class BadrikRunner {
         keyLight.position.set(2, 3, 3);
         this.menuScene.add(keyLight);
         
-        const fillLight = new THREE.DirectionalLight(0x9945FF, 0.5);
-        fillLight.position.set(-2, 1, 2);
-        this.menuScene.add(fillLight);
-        
-        const rimLight = new THREE.DirectionalLight(0x14F195, 0.5);
-        rimLight.position.set(0, 2, -2);
-        this.menuScene.add(rimLight);
-        
+        this.menuScene.add(new THREE.DirectionalLight(0x9945FF, 0.5)).position.set(-2, 1, 2);
+        this.menuScene.add(new THREE.DirectionalLight(0x14F195, 0.5)).position.set(0, 2, -2);
         this.menuScene.add(new THREE.AmbientLight(0xffffff, 0.3));
         
         this.loadMenuDog();
-        
         window.addEventListener('resize', () => this.onResize());
     }
     
@@ -214,22 +275,17 @@ class BadrikRunner {
         this.loader.load('bulldog.glb', (gltf) => {
             this.menuDog = gltf.scene;
             this.menuDog.scale.set(1, 1, 1);
-            this.menuDog.position.set(0, 0, 0);
-            
             this.applyTexture(this.menuDog, 'white');
             this.menuScene.add(this.menuDog);
             
             if (gltf.animations.length > 0) {
                 this.menuMixer = new THREE.AnimationMixer(this.menuDog);
                 const idleClip = gltf.animations.find(c => c.name.includes('idle'));
-                if (idleClip) {
-                    this.menuMixer.clipAction(idleClip).play();
-                }
+                if (idleClip) this.menuMixer.clipAction(idleClip).play();
             }
         });
     }
-
-
+    
     applyTexture(model, skinName) {
         const texture = this.textures[skinName];
         if (!texture) return;
@@ -239,121 +295,123 @@ class BadrikRunner {
                 child.castShadow = true;
                 child.receiveShadow = true;
                 child.material = new THREE.MeshStandardMaterial({
-                    map: texture,
-                    roughness: 0.7,
-                    metalness: 0.1
+                    map: texture, roughness: 0.7, metalness: 0.1
                 });
             }
         });
     }
-    
+
+
     // ==================== UI ====================
     initUI() {
-        // Wallet button
+        // Wallet
         document.getElementById('connectWallet').addEventListener('click', async () => {
+            this.sound.play('button');
             const success = await this.wallet.connect();
             if (success) {
                 document.getElementById('connectWallet').style.display = 'none';
                 const walletInfo = document.getElementById('walletInfo');
                 walletInfo.style.display = 'flex';
                 walletInfo.querySelector('.wallet-address').textContent = this.wallet.getShortAddress();
-                
-                // Generate referral link
                 this.updateReferralLink();
             }
         });
         
-        // Skin buttons
+        // Skins
         document.querySelectorAll('.skin-btn').forEach(btn => {
             btn.addEventListener('click', () => {
+                this.sound.play('button');
                 document.querySelectorAll('.skin-btn').forEach(b => b.classList.remove('selected'));
                 btn.classList.add('selected');
                 this.selectedSkin = btn.dataset.skin;
-                
-                if (this.menuDog) {
-                    this.applyTexture(this.menuDog, this.selectedSkin);
-                }
+                if (this.menuDog) this.applyTexture(this.menuDog, this.selectedSkin);
             });
         });
         
-        // Start button
-        document.getElementById('startGame').addEventListener('click', () => this.startGame());
+        // Start
+        document.getElementById('startGame').addEventListener('click', () => {
+            this.sound.play('button');
+            this.startGame();
+        });
         
-        // Game over buttons
-        document.getElementById('playAgain').addEventListener('click', () => this.restartGame());
-        document.getElementById('backToMenu').addEventListener('click', () => this.backToMenu());
-        
-        // Share button
+        // Game over
+        document.getElementById('playAgain').addEventListener('click', () => {
+            this.sound.play('button');
+            this.restartGame();
+        });
+        document.getElementById('backToMenu').addEventListener('click', () => {
+            this.sound.play('button');
+            this.backToMenu();
+        });
         document.getElementById('shareTwitter').addEventListener('click', () => this.shareOnTwitter());
         
         // Modals
         document.getElementById('showLeaderboard').addEventListener('click', (e) => {
             e.preventDefault();
+            this.sound.play('button');
             this.showLeaderboard();
         });
-        
         document.getElementById('showReferral').addEventListener('click', (e) => {
             e.preventDefault();
+            this.sound.play('button');
             this.showReferralModal();
         });
         
-        // Close modals
         document.querySelectorAll('.modal-close').forEach(btn => {
             btn.addEventListener('click', () => {
+                this.sound.play('button');
                 document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
             });
         });
         
-        // Copy referral
         document.getElementById('copyReferral').addEventListener('click', () => {
             const input = document.getElementById('referralLink');
             input.select();
             document.execCommand('copy');
             document.getElementById('copyReferral').textContent = 'Copied!';
-            setTimeout(() => {
-                document.getElementById('copyReferral').textContent = 'Copy';
-            }, 2000);
+            setTimeout(() => document.getElementById('copyReferral').textContent = 'Copy', 2000);
         });
     }
-
-
+    
     updateReferralLink() {
         if (this.wallet.address) {
             const link = `${window.location.origin}${window.location.pathname}?ref=${this.wallet.address.slice(0, 8)}`;
             document.getElementById('referralLink').value = link;
         }
     }
-    
-    showLeaderboard() {
+
+
+    async showLeaderboard() {
         document.getElementById('leaderboardModal').style.display = 'flex';
-        // TODO: Fetch from backend
-        document.getElementById('leaderboardList').innerHTML = `
-            <div class="leaderboard-item top-3">
-                <span class="leaderboard-rank">1</span>
-                <span class="leaderboard-address">7xK9...3mPq</span>
-                <span class="leaderboard-score">158,000</span>
-            </div>
-            <div class="leaderboard-item top-3">
-                <span class="leaderboard-rank">2</span>
-                <span class="leaderboard-address">3nB2...9xLw</span>
-                <span class="leaderboard-score">142,500</span>
-            </div>
-            <div class="leaderboard-item top-3">
-                <span class="leaderboard-rank">3</span>
-                <span class="leaderboard-address">9pM1...2kJr</span>
-                <span class="leaderboard-score">138,200</span>
-            </div>
-            <div class="leaderboard-item">
-                <span class="leaderboard-rank">4</span>
-                <span class="leaderboard-address">5tR7...8nQx</span>
-                <span class="leaderboard-score">125,800</span>
-            </div>
-            <div class="leaderboard-item">
-                <span class="leaderboard-rank">5</span>
-                <span class="leaderboard-address">2mK4...6pLz</span>
-                <span class="leaderboard-score">118,300</span>
-            </div>
-        `;
+        document.getElementById('leaderboardList').innerHTML = '<div class="loading">Loading...</div>';
+        
+        const data = await GameAPI.getLeaderboard(10);
+        
+        if (data.length === 0) {
+            document.getElementById('leaderboardList').innerHTML = '<div class="loading">No scores yet. Be the first!</div>';
+            return;
+        }
+        
+        let html = '';
+        data.forEach((entry, i) => {
+            const isTop3 = i < 3 ? 'top-3' : '';
+            const shortAddr = entry.wallet.slice(0, 4) + '...' + entry.wallet.slice(-4);
+            html += `
+                <div class="leaderboard-item ${isTop3}">
+                    <span class="leaderboard-rank">${i + 1}</span>
+                    <span class="leaderboard-address">${shortAddr}</span>
+                    <span class="leaderboard-score">${entry.score.toLocaleString()}</span>
+                </div>
+            `;
+        });
+        document.getElementById('leaderboardList').innerHTML = html;
+        
+        // Your rank
+        if (this.wallet.connected) {
+            const rankData = await GameAPI.getPlayerRank(this.wallet.address);
+            document.getElementById('yourRank').textContent = rankData.rank ? `#${rankData.rank}` : '#—';
+            document.getElementById('yourBestScore').textContent = rankData.bestScore?.toLocaleString() || '0';
+        }
     }
     
     showReferralModal() {
@@ -362,9 +420,8 @@ class BadrikRunner {
     }
     
     shareOnTwitter() {
-        const text = `🐕 I scored ${this.score.toLocaleString()} points in BADRIK RUN!\n\nPlay & earn $BADRIK tokens: ${window.location.href}\n\n#BADRIK #Solana #Web3Gaming`;
-        const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
-        window.open(url, '_blank');
+        const text = `🐕 I scored ${this.score.toLocaleString()} points in BADRIK RUN!\n\nPlay & earn $BADRIK tokens:\n${window.location.href}\n\n#BADRIK #Solana #Web3Gaming`;
+        window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, '_blank');
     }
 
 
@@ -387,6 +444,7 @@ class BadrikRunner {
         this.targetX = CONFIG.LANES[1];
         this.velocityY = 0;
         this.isJumping = false;
+        this.isSliding = false;
         this.lastObstacleZ = -50;
         this.lastCoinZ = -30;
         
@@ -399,7 +457,6 @@ class BadrikRunner {
     }
     
     restartGame() {
-        // Clear old objects
         this.obstacles.forEach(o => this.scene.remove(o));
         this.coinObjects.forEach(c => this.scene.remove(c));
         this.obstacles = [];
@@ -407,6 +464,7 @@ class BadrikRunner {
         
         if (this.dog) {
             this.dog.position.set(0, 0, 0);
+            this.dog.scale.copy(this.normalScale);
             this.currentLane = 1;
             this.targetX = CONFIG.LANES[1];
         }
@@ -417,12 +475,14 @@ class BadrikRunner {
         this.speed = CONFIG.INITIAL_SPEED;
         this.velocityY = 0;
         this.isJumping = false;
+        this.isSliding = false;
         this.isGameOver = false;
         this.isPlaying = true;
         this.lastObstacleZ = -50;
         this.lastCoinZ = -30;
         
         document.getElementById('gameOver').style.display = 'none';
+        this.playAnimation('run');
         this.updateHUD();
     }
     
@@ -441,12 +501,8 @@ class BadrikRunner {
     // ==================== GAME SCENE ====================
     initGameScene() {
         this.scene = new THREE.Scene();
-        
-        // Gradient sky
-        const skyColor = new THREE.Color(0x1a0a2e);
-        const groundColor = new THREE.Color(0x0a0a1a);
-        this.scene.background = skyColor;
-        this.scene.fog = new THREE.Fog(skyColor, 40, 120);
+        this.scene.background = new THREE.Color(0x1a0a2e);
+        this.scene.fog = new THREE.Fog(0x1a0a2e, 40, 120);
         
         const canvas = document.getElementById('gameCanvas');
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
@@ -464,11 +520,6 @@ class BadrikRunner {
         sun.castShadow = true;
         sun.shadow.mapSize.width = 2048;
         sun.shadow.mapSize.height = 2048;
-        sun.shadow.camera.far = 100;
-        sun.shadow.camera.left = -20;
-        sun.shadow.camera.right = 20;
-        sun.shadow.camera.top = 20;
-        sun.shadow.camera.bottom = -20;
         this.scene.add(sun);
         
         this.scene.add(new THREE.AmbientLight(0x9945FF, 0.3));
@@ -476,12 +527,9 @@ class BadrikRunner {
     }
     
     createWorld() {
-        // Create ground segments
+        // Ground
         const groundGeo = new THREE.PlaneGeometry(15, CONFIG.GROUND_LENGTH);
-        const groundMat = new THREE.MeshStandardMaterial({ 
-            color: 0x1a1a2e,
-            roughness: 0.9
-        });
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x1a1a2e, roughness: 0.9 });
         
         for (let i = 0; i < CONFIG.GROUND_SEGMENTS; i++) {
             const ground = new THREE.Mesh(groundGeo, groundMat);
@@ -492,35 +540,21 @@ class BadrikRunner {
             this.grounds.push(ground);
         }
         
-        // Lane markers
-        this.createLaneMarkers();
-        
-        // Side walls (for visual)
-        this.createSideWalls();
-    }
-    
-    createLaneMarkers() {
+        // Lane lines
         const lineGeo = new THREE.PlaneGeometry(0.1, CONFIG.GROUND_LENGTH * CONFIG.GROUND_SEGMENTS);
-        const lineMat = new THREE.MeshBasicMaterial({ color: 0x333344 });
-        
+        const lineMat = new THREE.MeshBasicMaterial({ color: 0x333355 });
         [-CONFIG.LANE_WIDTH, CONFIG.LANE_WIDTH].forEach(x => {
             const line = new THREE.Mesh(lineGeo, lineMat);
             line.rotation.x = -Math.PI / 2;
             line.position.set(x, 0.01, -CONFIG.GROUND_LENGTH);
             this.scene.add(line);
         });
-    }
-    
-    createSideWalls() {
+        
+        // Side walls
         const wallGeo = new THREE.BoxGeometry(1, 3, CONFIG.GROUND_LENGTH * CONFIG.GROUND_SEGMENTS);
         const wallMat = new THREE.MeshStandardMaterial({ 
-            color: 0x14F195,
-            emissive: 0x14F195,
-            emissiveIntensity: 0.2,
-            transparent: true,
-            opacity: 0.3
+            color: 0x14F195, emissive: 0x14F195, emissiveIntensity: 0.2, transparent: true, opacity: 0.3
         });
-        
         [-8, 8].forEach(x => {
             const wall = new THREE.Mesh(wallGeo, wallMat);
             wall.position.set(x, 1.5, -CONFIG.GROUND_LENGTH);
@@ -535,12 +569,11 @@ class BadrikRunner {
             this.dog = gltf.scene;
             this.dog.scale.set(1, 1, 1);
             this.dog.position.set(CONFIG.LANES[1], 0, 0);
-            this.dog.rotation.y = Math.PI; // Face forward (negative Z)
+            this.dog.rotation.y = Math.PI;
             
             this.applyTexture(this.dog, this.selectedSkin);
             this.scene.add(this.dog);
             
-            // Setup animations
             if (gltf.animations.length > 0) {
                 this.mixer = new THREE.AnimationMixer(this.dog);
                 gltf.animations.forEach(clip => {
@@ -551,28 +584,23 @@ class BadrikRunner {
         });
     }
     
-    playAnimation(name) {
-        // Find animation containing name
-        const animName = Object.keys(this.animations).find(n => n.toLowerCase().includes(name.toLowerCase()));
-        if (!animName) return;
+    playAnimation(name, crossfade = 0.2) {
+        const animName = Object.keys(this.animations).find(n => 
+            n.toLowerCase().includes(name.toLowerCase())
+        );
+        if (!animName || this.currentAnimName === animName) return;
+        
+        Object.values(this.animations).forEach(a => a.fadeOut(crossfade));
         
         const action = this.animations[animName];
-        if (!action) return;
-        
-        // Stop all other animations
-        Object.values(this.animations).forEach(a => {
-            if (a !== action) a.fadeOut(0.2);
-        });
-        
-        action.reset().fadeIn(0.2).play();
+        action.reset().fadeIn(crossfade).play();
+        this.currentAnimName = animName;
     }
     
     // ==================== INPUT ====================
     setupInput() {
-        // Keyboard
         window.addEventListener('keydown', (e) => this.onKeyDown(e));
         
-        // Touch
         const canvas = this.renderer.domElement;
         canvas.addEventListener('touchstart', (e) => this.onTouchStart(e), { passive: false });
         canvas.addEventListener('touchend', (e) => this.onTouchEnd(e), { passive: false });
@@ -583,27 +611,10 @@ class BadrikRunner {
         if (!this.isPlaying || this.isGameOver) return;
         
         switch(e.key) {
-            case 'ArrowLeft':
-            case 'a':
-            case 'A':
-                this.moveLeft();
-                break;
-            case 'ArrowRight':
-            case 'd':
-            case 'D':
-                this.moveRight();
-                break;
-            case 'ArrowUp':
-            case 'w':
-            case 'W':
-            case ' ':
-                this.jump();
-                break;
-            case 'ArrowDown':
-            case 's':
-            case 'S':
-                this.slide();
-                break;
+            case 'ArrowLeft': case 'a': case 'A': this.moveLeft(); break;
+            case 'ArrowRight': case 'd': case 'D': this.moveRight(); break;
+            case 'ArrowUp': case 'w': case 'W': case ' ': this.jump(); break;
+            case 'ArrowDown': case 's': case 'S': this.slide(); break;
         }
     }
     
@@ -616,26 +627,19 @@ class BadrikRunner {
     onTouchEnd(e) {
         if (!this.isPlaying || this.isGameOver) return;
         
-        const touchEndX = e.changedTouches[0].clientX;
-        const touchEndY = e.changedTouches[0].clientY;
-        
-        const deltaX = touchEndX - this.touchStartX;
-        const deltaY = touchEndY - this.touchStartY;
-        
+        const dx = e.changedTouches[0].clientX - this.touchStartX;
+        const dy = e.changedTouches[0].clientY - this.touchStartY;
         const minSwipe = 30;
         
-        if (Math.abs(deltaX) > Math.abs(deltaY)) {
-            // Horizontal swipe
-            if (deltaX > minSwipe) this.moveRight();
-            else if (deltaX < -minSwipe) this.moveLeft();
+        if (Math.abs(dx) > Math.abs(dy)) {
+            if (dx > minSwipe) this.moveRight();
+            else if (dx < -minSwipe) this.moveLeft();
         } else {
-            // Vertical swipe
-            if (deltaY < -minSwipe) this.jump();
-            else if (deltaY > minSwipe) this.slide();
+            if (dy < -minSwipe) this.jump();
+            else if (dy > minSwipe) this.slide();
         }
     }
-
-
+    
     moveLeft() {
         if (this.currentLane > 0) {
             this.currentLane--;
@@ -651,47 +655,41 @@ class BadrikRunner {
     }
     
     jump() {
-        if (!this.isJumping) {
+        if (!this.isJumping && !this.isSliding) {
             this.isJumping = true;
             this.velocityY = CONFIG.JUMP_FORCE;
+            this.sound.play('jump');
         }
     }
     
     slide() {
-        // TODO: Add slide animation and hitbox change
-        this.isSliding = true;
-        setTimeout(() => this.isSliding = false, 500);
+        if (!this.isSliding && !this.isJumping) {
+            this.isSliding = true;
+            this.slideTimer = CONFIG.SLIDE_DURATION;
+            this.dog.scale.copy(this.slideScale);
+            this.playAnimation('layingdown');
+            this.sound.play('slide');
+        }
     }
-    
-    // ==================== OBSTACLES ====================
+
+
+    // ==================== OBSTACLES & COINS ====================
     spawnObstacle() {
         const lane = Math.floor(Math.random() * 3);
         const x = CONFIG.LANES[lane];
         
-        // Random obstacle type
-        const types = ['box', 'tall', 'wide'];
+        const types = ['box', 'tall', 'low'];
         const type = types[Math.floor(Math.random() * types.length)];
         
         let geometry, height;
         switch(type) {
-            case 'box':
-                geometry = new THREE.BoxGeometry(1.5, 1.5, 1.5);
-                height = 0.75;
-                break;
-            case 'tall':
-                geometry = new THREE.BoxGeometry(1, 3, 1);
-                height = 1.5;
-                break;
-            case 'wide':
-                geometry = new THREE.BoxGeometry(2, 1, 2);
-                height = 0.5;
-                break;
+            case 'box': geometry = new THREE.BoxGeometry(1.5, 1.5, 1.5); height = 0.75; break;
+            case 'tall': geometry = new THREE.BoxGeometry(1, 3, 1); height = 1.5; break;
+            case 'low': geometry = new THREE.BoxGeometry(2, 0.8, 2); height = 0.4; break;
         }
         
         const material = new THREE.MeshStandardMaterial({
-            color: 0xff4444,
-            emissive: 0xff0000,
-            emissiveIntensity: 0.2
+            color: 0xff4444, emissive: 0xff0000, emissiveIntensity: 0.2
         });
         
         const obstacle = new THREE.Mesh(geometry, material);
@@ -704,7 +702,6 @@ class BadrikRunner {
         this.lastObstacleZ = obstacle.position.z;
     }
     
-    // ==================== COINS ====================
     spawnCoinRow() {
         const lane = Math.floor(Math.random() * 3);
         const x = CONFIG.LANES[lane];
@@ -713,11 +710,7 @@ class BadrikRunner {
         for (let i = 0; i < count; i++) {
             const coinGeo = new THREE.TorusGeometry(0.3, 0.1, 8, 16);
             const coinMat = new THREE.MeshStandardMaterial({
-                color: 0xffc864,
-                emissive: 0xffa500,
-                emissiveIntensity: 0.5,
-                metalness: 0.8,
-                roughness: 0.2
+                color: 0xffc864, emissive: 0xffa500, emissiveIntensity: 0.5, metalness: 0.8, roughness: 0.2
             });
             
             const coin = new THREE.Mesh(coinGeo, coinMat);
@@ -729,7 +722,7 @@ class BadrikRunner {
             this.coinObjects.push(coin);
         }
         
-        this.lastCoinZ = this.lastCoinZ - CONFIG.COIN_SPAWN_DISTANCE - count * 3;
+        this.lastCoinZ -= CONFIG.COIN_SPAWN_DISTANCE + count * 3;
     }
 
 
@@ -738,11 +731,16 @@ class BadrikRunner {
         if (!this.dog) return;
         
         const playerBox = new THREE.Box3().setFromObject(this.dog);
-        playerBox.expandByScalar(-0.2); // Slightly smaller hitbox
+        playerBox.expandByScalar(-0.3);
         
-        // Check obstacles
+        // Obstacles
         for (const obstacle of this.obstacles) {
             const obstacleBox = new THREE.Box3().setFromObject(obstacle);
+            
+            // Skip low obstacles if sliding
+            if (this.isSliding && obstacle.userData.obstacleType === 'low') continue;
+            // Skip tall obstacles if jumping high enough
+            if (this.isJumping && this.dog.position.y > 1.5 && obstacle.userData.obstacleType === 'tall') continue;
             
             if (playerBox.intersectsBox(obstacleBox)) {
                 this.gameOver();
@@ -750,59 +748,56 @@ class BadrikRunner {
             }
         }
         
-        // Check coins
+        // Coins
         for (let i = this.coinObjects.length - 1; i >= 0; i--) {
             const coin = this.coinObjects[i];
             const coinBox = new THREE.Box3().setFromObject(coin);
             
             if (playerBox.intersectsBox(coinBox)) {
-                this.collectCoin(coin, i);
+                this.scene.remove(coin);
+                this.coinObjects.splice(i, 1);
+                this.coins++;
+                this.score += CONFIG.COIN_VALUE;
+                this.sound.play('coin');
             }
         }
-    }
-    
-    collectCoin(coin, index) {
-        this.scene.remove(coin);
-        this.coinObjects.splice(index, 1);
-        this.coins++;
-        this.score += CONFIG.COIN_VALUE;
-        
-        // TODO: Add sound effect
     }
     
     // ==================== GAME OVER ====================
     gameOver() {
         this.isPlaying = false;
         this.isGameOver = true;
+        this.sound.play('crash');
         
-        // Update best score
         if (this.score > this.bestScore) {
             this.bestScore = this.score;
             localStorage.setItem('badrik_best', this.bestScore.toString());
         }
         
-        // Show game over screen
         document.getElementById('gameOver').style.display = 'flex';
         document.getElementById('finalScore').textContent = this.score.toLocaleString();
         document.getElementById('finalCoins').textContent = this.coins.toLocaleString();
         document.getElementById('finalDistance').textContent = Math.floor(this.distance) + 'm';
         document.getElementById('bestScore').textContent = this.bestScore.toLocaleString();
         
-        // Submit score to backend
         this.submitScore();
     }
     
     async submitScore() {
         if (!this.wallet.connected) return;
         
-        // TODO: Implement backend submission
-        console.log('Submitting score:', {
-            wallet: this.wallet.address,
-            score: this.score,
-            coins: this.coins,
-            distance: this.distance,
-            referral: this.referralCode
-        });
+        const message = `BADRIK RUN Score: ${this.score} | ${Date.now()}`;
+        const signature = await this.wallet.signMessage(message);
+        
+        if (signature) {
+            await GameAPI.submitScore(
+                this.wallet.address,
+                this.score,
+                this.coins,
+                Math.floor(this.distance),
+                Array.from(signature.signature)
+            );
+        }
     }
 
 
@@ -810,14 +805,12 @@ class BadrikRunner {
     update(delta) {
         if (!this.isPlaying || this.isGameOver || !this.dog) return;
         
-        // Increase speed over time
+        // Speed
         this.speed = Math.min(this.speed + CONFIG.SPEED_INCREASE * delta, CONFIG.MAX_SPEED);
-        
-        // Move player forward (actually move world backward)
         this.distance += this.speed * delta;
         this.score = Math.floor(this.distance * CONFIG.DISTANCE_MULTIPLIER) + this.coins * CONFIG.COIN_VALUE;
         
-        // Lane switching
+        // Lane switch
         const dx = this.targetX - this.dog.position.x;
         if (Math.abs(dx) > 0.05) {
             this.dog.position.x += Math.sign(dx) * CONFIG.LANE_SWITCH_SPEED * delta;
@@ -825,7 +818,7 @@ class BadrikRunner {
             this.dog.position.x = this.targetX;
         }
         
-        // Jump physics
+        // Jump
         if (this.isJumping) {
             this.velocityY += CONFIG.GRAVITY * delta;
             this.dog.position.y += this.velocityY * delta;
@@ -834,56 +827,57 @@ class BadrikRunner {
                 this.dog.position.y = 0;
                 this.isJumping = false;
                 this.velocityY = 0;
+                this.playAnimation('run');
             }
         }
         
-        // Move obstacles toward player
+        // Slide timer
+        if (this.isSliding) {
+            this.slideTimer -= delta * 1000;
+            if (this.slideTimer <= 0) {
+                this.isSliding = false;
+                this.dog.scale.copy(this.normalScale);
+                this.playAnimation('run');
+            }
+        }
+        
+        // Move obstacles
         for (let i = this.obstacles.length - 1; i >= 0; i--) {
             const obstacle = this.obstacles[i];
             obstacle.position.z += this.speed * delta;
-            
-            // Remove if behind player
             if (obstacle.position.z > 10) {
                 this.scene.remove(obstacle);
                 this.obstacles.splice(i, 1);
             }
         }
         
-        // Move coins toward player
+        // Move coins
         for (let i = this.coinObjects.length - 1; i >= 0; i--) {
             const coin = this.coinObjects[i];
             coin.position.z += this.speed * delta;
-            coin.rotation.z += delta * 3; // Spin
-            
+            coin.rotation.z += delta * 3;
             if (coin.position.z > 10) {
                 this.scene.remove(coin);
                 this.coinObjects.splice(i, 1);
             }
         }
         
-        // Spawn new obstacles
-        if (this.obstacles.length === 0 || 
-            this.obstacles[this.obstacles.length - 1].position.z > this.lastObstacleZ + CONFIG.MIN_OBSTACLE_GAP) {
-            if (Math.random() < 0.02) {
+        // Spawn
+        if (this.obstacles.length === 0 || Math.random() < 0.015) {
+            const lastZ = this.obstacles.length > 0 ? this.obstacles[this.obstacles.length - 1].position.z : 0;
+            if (lastZ > -CONFIG.OBSTACLE_SPAWN_DISTANCE + CONFIG.MIN_OBSTACLE_GAP) {
                 this.spawnObstacle();
             }
         }
         
-        // Spawn new coins
-        if (this.coinObjects.length < 10 && Math.random() < 0.01) {
+        if (this.coinObjects.length < 15 && Math.random() < 0.01) {
             this.spawnCoinRow();
         }
         
-        // Check collisions
         this.checkCollisions();
-        
-        // Update HUD
         this.updateHUD();
         
-        // Update animation mixer
-        if (this.mixer) {
-            this.mixer.update(delta);
-        }
+        if (this.mixer) this.mixer.update(delta);
     }
     
     updateHUD() {
@@ -899,13 +893,8 @@ class BadrikRunner {
         requestAnimationFrame(() => this.animateMenu());
         
         const delta = this.clock.getDelta();
-        
         if (this.menuMixer) this.menuMixer.update(delta);
-        
-        // Gentle sway
-        if (this.menuDog) {
-            this.menuDog.rotation.y = Math.sin(Date.now() * 0.001) * 0.2;
-        }
+        if (this.menuDog) this.menuDog.rotation.y = Math.sin(Date.now() * 0.001) * 0.2;
         
         this.menuRenderer.render(this.menuScene, this.menuCamera);
     }
@@ -915,10 +904,8 @@ class BadrikRunner {
         requestAnimationFrame(() => this.animate());
         
         const delta = Math.min(this.clock.getDelta(), 0.1);
-        
         this.update(delta);
         
-        // Camera follow
         if (this.dog && this.camera) {
             this.camera.position.x = this.dog.position.x * 0.3;
             this.camera.lookAt(this.dog.position.x * 0.5, 1, -20);
@@ -946,6 +933,4 @@ class BadrikRunner {
 }
 
 // ==================== START ====================
-window.addEventListener('DOMContentLoaded', () => {
-    new BadrikRunner();
-});
+window.addEventListener('DOMContentLoaded', () => new BadrikRunner());
