@@ -303,12 +303,32 @@ class Game {
     }
     
     loadMenuDog() {
+        // Load texture
+        const textureLoader = new THREE.TextureLoader();
+        this.dogTextures = {
+            fawn: textureLoader.load('frenchbulldog.texture.fawn.001.png'),
+            white: textureLoader.load('frenchbulldog.texture.white.001.png'),
+            black: textureLoader.load('frenchbulldog.texture.blackpied.001.png')
+        };
+        Object.values(this.dogTextures).forEach(t => t.flipY = false);
+        this.currentSkin = 'fawn';
+        
         this.loader.load('bulldog.glb', (gltf) => {
             this.menuDog = gltf.scene;
             this.menuDog.scale.set(1, 1, 1);
             this.menuDog.position.set(0, -0.3, 0);
             
-            // Keep original brown/natural colors - don't override materials
+            // Apply texture
+            this.menuDog.traverse(child => {
+                if (child.isMesh) {
+                    child.material = new THREE.MeshStandardMaterial({
+                        map: this.dogTextures[this.currentSkin],
+                        roughness: 0.6,
+                        metalness: 0.1
+                    });
+                }
+            });
+            
             this.menuScene.add(this.menuDog);
             
             // Animations
@@ -330,6 +350,21 @@ class Game {
                 this.isScratching = false;
             }
         });
+    }
+    
+    changeSkin(skinName) {
+        if (!this.dogTextures[skinName]) return;
+        this.currentSkin = skinName;
+        
+        // Update menu dog
+        if (this.menuDog) {
+            this.menuDog.traverse(child => {
+                if (child.isMesh) {
+                    child.material.map = this.dogTextures[skinName];
+                    child.material.needsUpdate = true;
+                }
+            });
+        }
     }
     
     playMenuAnimation(name) {
@@ -540,13 +575,30 @@ class Game {
     
     // ==================== PLAYER ====================
     loadPlayer() {
+        // Load texture first
+        const textureLoader = new THREE.TextureLoader();
+        const texture = textureLoader.load('frenchbulldog.texture.fawn.001.png');
+        texture.flipY = false;
+        
         this.loader.load('bulldog.glb', (gltf) => {
             this.dog = gltf.scene;
             this.dog.scale.set(CONFIG.DOG_SCALE, CONFIG.DOG_SCALE, CONFIG.DOG_SCALE);
             this.dog.position.set(0, CONFIG.DOG_Y, 0);
             this.dog.rotation.y = Math.PI;
             
-            // Keep original brown colors - will add glow during boosts
+            // Apply texture to dog
+            this.dog.traverse(child => {
+                if (child.isMesh) {
+                    child.material = new THREE.MeshStandardMaterial({
+                        map: texture,
+                        roughness: 0.6,
+                        metalness: 0.1,
+                        transparent: false,
+                        opacity: 1.0
+                    });
+                }
+            });
+            
             this.scene.add(this.dog);
             
             // Animations
@@ -1106,6 +1158,18 @@ class Game {
         document.getElementById('bestScore').textContent = this.bestScore.toLocaleString();
     }
     
+    shareGame() {
+        const text = '🐕 Play BADRIK: Solana Cyber Runner! Can you beat my score?\n\n';
+        const url = 'https://kisa134.github.io/badrik-run/';
+        window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank');
+    }
+    
+    shareScore() {
+        const text = `🐕 I scored ${this.score} points in BADRIK: Solana Cyber Runner!\n🏆 Distance: ${Math.floor(this.distance)}m\n💎 Shards: ${this.shards}\n\nCan you beat me?`;
+        const url = 'https://kisa134.github.io/badrik-run/';
+        window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank');
+    }
+    
     backToMenu() {
         this.isPlaying = false;
         this.isInMenu = true;
@@ -1120,6 +1184,7 @@ class Game {
     
     // ==================== UI ====================
     initUI() {
+        // Play button
         document.getElementById('playBtn').addEventListener('click', () => {
             this.sound.play('button');
             this.startGame();
@@ -1135,6 +1200,39 @@ class Game {
             this.backToMenu();
         });
         
+        // Skin selection
+        document.querySelectorAll('.skin-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.skin-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.changeSkin(btn.dataset.skin);
+                this.sound.play('button');
+            });
+        });
+        
+        // Leaderboard
+        document.getElementById('leaderboardBtn').addEventListener('click', () => {
+            this.sound.play('button');
+            document.getElementById('leaderboardModal').style.display = 'flex';
+        });
+        
+        document.getElementById('closeLeaderboard').addEventListener('click', () => {
+            this.sound.play('button');
+            document.getElementById('leaderboardModal').style.display = 'none';
+        });
+        
+        // Share
+        document.getElementById('shareBtn').addEventListener('click', () => {
+            this.sound.play('button');
+            this.shareGame();
+        });
+        
+        document.getElementById('shareScore')?.addEventListener('click', () => {
+            this.sound.play('button');
+            this.shareScore();
+        });
+        
+        // Wallet
         document.getElementById('connectWallet').addEventListener('click', async () => {
             this.sound.play('button');
             const ok = await this.wallet.connect();
@@ -1144,6 +1242,9 @@ class Game {
                 document.querySelector('.wallet-address').textContent = this.wallet.getShortAddress();
             }
         });
+        
+        // Update best score in menu
+        document.getElementById('menuBestScore').textContent = this.bestScore;
         
         // Resize
         window.addEventListener('resize', () => {

@@ -17,38 +17,38 @@
             <h1 class="title">BADRIK</h1>
             <p class="subtitle">SOLANA CYBER RUNNER</p>
             
-            <button id="playBtn" class="neon-btn">▶ PLAY</button>
+            <!-- Skin Selection -->
+            <div class="skin-selector">
+                <button class="skin-btn active" data-skin="fawn">🟤</button>
+                <button class="skin-btn" data-skin="white">⚪</button>
+                <button class="skin-btn" data-skin="black">⚫</button>
+            </div>
+            
+            <button id="playBtn" class="neon-btn big">▶ PLAY</button>
+            
+            <div class="menu-buttons">
+                <button id="leaderboardBtn" class="neon-btn small">🏆 Leaderboard</button>
+                <button id="shareBtn" class="neon-btn small">📤 Share</button>
+            </div>
             
             <div class="wallet-section">
-                <button id="connectWallet" class="neon-btn small">Connect Wallet</button>
+                <button id="connectWallet" class="neon-btn">🔗 Connect Wallet</button>
                 <div id="walletInfo" style="display: none;">
                     <span class="wallet-address"></span>
                 </div>
             </div>
             
-            <div class="best-score">
-                BEST: <span id="menuBestScore">0</span>
-            </div>
+            <div class="best-score">BEST: <span id="menuBestScore">0</span></div>
         </div>
     </div>
-    
+
     <!-- GAME -->
     <div id="gameContainer" style="display: none;">
         <canvas id="gameCanvas"></canvas>
-        
         <div id="hud">
-            <div class="hud-item">
-                <span class="hud-label">SCORE</span>
-                <span id="score">0</span>
-            </div>
-            <div class="hud-item">
-                <span class="hud-label">SHARDS</span>
-                <span id="shards">0</span>
-            </div>
-            <div class="hud-item">
-                <span class="hud-label">DIST</span>
-                <span id="distance">0m</span>
-            </div>
+            <div class="hud-item"><span class="hud-label">SCORE</span><span id="score">0</span></div>
+            <div class="hud-item"><span class="hud-label">SHARDS</span><span id="shards">0</span></div>
+            <div class="hud-item"><span class="hud-label">DIST</span><span id="distance">0m</span></div>
         </div>
     </div>
     
@@ -56,40 +56,33 @@
     <div id="gameOver" style="display: none;">
         <div class="game-over-box">
             <h2>GAME OVER</h2>
-            
             <div class="stats">
-                <div class="stat">
-                    <span class="stat-label">SCORE</span>
-                    <span id="finalScore">0</span>
-                </div>
-                <div class="stat">
-                    <span class="stat-label">SHARDS</span>
-                    <span id="finalShards">0</span>
-                </div>
-                <div class="stat">
-                    <span class="stat-label">DISTANCE</span>
-                    <span id="finalDistance">0m</span>
-                </div>
-                <div class="stat best">
-                    <span class="stat-label">BEST</span>
-                    <span id="bestScore">0</span>
-                </div>
+                <div class="stat"><span class="stat-label">SCORE</span><span id="finalScore">0</span></div>
+                <div class="stat"><span class="stat-label">SHARDS</span><span id="finalShards">0</span></div>
+                <div class="stat"><span class="stat-label">DISTANCE</span><span id="finalDistance">0m</span></div>
+                <div class="stat best"><span class="stat-label">BEST</span><span id="bestScore">0</span></div>
             </div>
-            
             <div class="buttons">
                 <button id="playAgain" class="neon-btn">▶ PLAY AGAIN</button>
+                <button id="shareScore" class="neon-btn small">📤 Share Score</button>
                 <button id="backToMenu" class="neon-btn small">MENU</button>
             </div>
         </div>
     </div>
     
+    <!-- LEADERBOARD MODAL -->
+    <div id="leaderboardModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>🏆 LEADERBOARD</h2>
+            <div id="leaderboardList" class="leaderboard-list">
+                <div class="leader-item"><span>1.</span><span>Loading...</span><span>-</span></div>
+            </div>
+            <button id="closeLeaderboard" class="neon-btn small">CLOSE</button>
+        </div>
+    </div>
+    
     <script type="importmap">
-    {
-        "imports": {
-            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-        }
-    }
+    {"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
     </script>
     <script type="module" src="game.js"></script>
 </body>
