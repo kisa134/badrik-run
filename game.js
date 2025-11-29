@@ -695,7 +695,18 @@ class Game {
         if (!this.isJumping && !this.isSliding) {
             this.isJumping = true;
             this.velocityY = CONFIG.JUMP_FORCE;
-            // Keep running animation during jump
+            
+            // SQUASH before jump!
+            if (this.dog) {
+                this.dog.scale.set(CONFIG.DOG_SCALE * 1.2, CONFIG.DOG_SCALE * 0.7, CONFIG.DOG_SCALE * 1.2);
+                setTimeout(() => {
+                    if (this.dog && this.isJumping) {
+                        // STRETCH in air!
+                        this.dog.scale.set(CONFIG.DOG_SCALE * 0.85, CONFIG.DOG_SCALE * 1.3, CONFIG.DOG_SCALE * 0.85);
+                    }
+                }, 50);
+            }
+            
             this.sound.play('jump');
         }
     }
@@ -704,8 +715,7 @@ class Game {
         if (!this.isJumping && !this.isSliding) {
             this.isSliding = true;
             this.slideTimer = CONFIG.SLIDE_DURATION;
-            // Play lay animation instead of squashing
-            this.playAnimation('lay');
+            this.playAnimation('layingdown_A_0');
             this.sound.play('slide');
         }
     }
@@ -850,7 +860,14 @@ class Game {
                 this.dog.position.y = CONFIG.DOG_Y;
                 this.isJumping = false;
                 this.velocityY = 0;
-                if (!this.isSliding) this.playAnimation('run');
+                
+                // SQUASH on landing!
+                this.dog.scale.set(CONFIG.DOG_SCALE * 1.15, CONFIG.DOG_SCALE * 0.8, CONFIG.DOG_SCALE * 1.15);
+                setTimeout(() => {
+                    if (this.dog) this.dog.scale.set(CONFIG.DOG_SCALE, CONFIG.DOG_SCALE, CONFIG.DOG_SCALE);
+                }, 100);
+                
+                if (!this.isSliding) this.playAnimation('run_A_0');
             }
         }
         
@@ -859,7 +876,7 @@ class Game {
             this.slideTimer -= delta * 1000;
             if (this.slideTimer <= 0) {
                 this.isSliding = false;
-                this.playAnimation('run');
+                this.playAnimation('run_A_0');
             }
         }
         
@@ -911,6 +928,9 @@ class Game {
         
         // Collisions
         this.checkCollisions();
+        
+        // Combo timeout check
+        this.updateCombo();
         
         // Update HUD
         this.updateHUD();
@@ -1027,7 +1047,7 @@ class Game {
             }
         }
         
-        // Check shards
+        // Check shards - JUICY COLLECTION!
         const shards = this.shardPool.getActive();
         for (let i = shards.length - 1; i >= 0; i--) {
             const shard = shards[i];
@@ -1039,11 +1059,74 @@ class Game {
                 Math.abs(sz - pz) < 1.5 && 
                 Math.abs(sy - py - 2) < 2) {
                 
-                this.spawnCollectParticles(shard.position.clone());
-                this.shardPool.release(shard);
-                this.shards++;
-                this.sound.play('coin');
+                // Juicy collect!
+                this.collectShard(shard);
             }
+        }
+    }
+    
+    // JUICY SHARD COLLECTION
+    collectShard(shard) {
+        // Spawn particles at shard position
+        this.spawnCollectParticles(shard.position.clone());
+        
+        // Release shard
+        this.shardPool.release(shard);
+        
+        // Increment
+        this.shards++;
+        this.score += 10;
+        
+        // Combo system
+        this.comboCount = (this.comboCount || 0) + 1;
+        this.lastCollectTime = Date.now();
+        
+        // Play sound
+        this.sound.play('coin');
+        
+        // Pop the HUD
+        this.popHUD();
+        
+        // Combo feedback
+        if (this.comboCount >= 5 && this.comboCount % 5 === 0) {
+            this.showFloatingText('COMBO x' + Math.floor(this.comboCount / 5) + '!');
+        }
+        
+        // Score milestone feedback
+        if (this.score > 0 && this.score % 100 === 0) {
+            this.showFloatingText('🔥 ' + this.score + '!');
+        }
+    }
+    
+    popHUD() {
+        // Make shards counter pop
+        const shardsEl = document.getElementById('shards')?.parentElement;
+        if (shardsEl) {
+            shardsEl.classList.add('pop');
+            setTimeout(() => shardsEl.classList.remove('pop'), 100);
+        }
+    }
+    
+    showFloatingText(text) {
+        const el = document.getElementById('floatingText');
+        if (el) {
+            el.textContent = text;
+            el.style.display = 'block';
+            el.style.animation = 'none';
+            el.offsetHeight; // Force reflow
+            el.style.animation = 'floatUp 1s ease-out forwards';
+            setTimeout(() => el.style.display = 'none', 1000);
+        }
+    }
+    
+    // Check combo timeout
+    updateCombo() {
+        if (this.lastCollectTime && Date.now() - this.lastCollectTime > 2000) {
+            if (this.comboCount >= 10) {
+                this.showFloatingText('COMBO END: +' + (this.comboCount * 5) + '!');
+                this.score += this.comboCount * 5;
+            }
+            this.comboCount = 0;
         }
     }
     
@@ -1135,20 +1218,49 @@ class Game {
         this.isGameOver = true;
         this.sound.stopMusic();
         
+        // Screen shake!
+        this.screenShake();
+        
         setTimeout(() => this.sound.play('crash'), 50);
         
         // Save best
-        if (this.score > this.bestScore) {
+        const isNewBest = this.score > this.bestScore;
+        if (isNewBest) {
             this.bestScore = this.score;
             localStorage.setItem('badrik_best', this.bestScore);
         }
         
-        // Show UI
-        document.getElementById('gameOver').style.display = 'flex';
-        document.getElementById('finalScore').textContent = this.score.toLocaleString();
-        document.getElementById('finalShards').textContent = this.shards.toLocaleString();
-        document.getElementById('finalDistance').textContent = Math.floor(this.distance) + 'm';
-        document.getElementById('bestScore').textContent = this.bestScore.toLocaleString();
+        // Delay game over screen for dramatic effect
+        setTimeout(() => {
+            document.getElementById('gameOver').style.display = 'flex';
+            document.getElementById('finalScore').textContent = this.score.toLocaleString();
+            document.getElementById('finalShards').textContent = this.shards.toLocaleString();
+            document.getElementById('finalDistance').textContent = Math.floor(this.distance) + 'm';
+            document.getElementById('bestScore').textContent = this.bestScore.toLocaleString();
+            
+            if (isNewBest) {
+                this.showFloatingText('🎉 NEW BEST!');
+            }
+        }, 500);
+    }
+    
+    screenShake() {
+        const container = document.getElementById('gameContainer');
+        if (!container) return;
+        
+        let shakes = 10;
+        const shake = () => {
+            if (shakes <= 0) {
+                container.style.transform = '';
+                return;
+            }
+            const x = (Math.random() - 0.5) * 20;
+            const y = (Math.random() - 0.5) * 20;
+            container.style.transform = `translate(${x}px, ${y}px)`;
+            shakes--;
+            requestAnimationFrame(shake);
+        };
+        shake();
     }
     
     shareGame() {
