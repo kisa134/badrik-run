@@ -46,8 +46,8 @@ const CONFIG = {
     LANE_SWITCH_SPEED: 20,
     SLIDE_DURATION: 500,
     
-    // Spawning - obstacles visible earlier
-    OBSTACLE_DISTANCE: 25,
+    // Spawning
+    OBSTACLE_DISTANCE: 20,
     SHARD_DISTANCE: 3,
     SPAWN_Z: -200,
     DESPAWN_Z: 15,
@@ -729,35 +729,63 @@ class Game {
         
         switch(pattern) {
             case 'single':
-                this.createObstacle(Math.floor(Math.random() * 3), z, 'normal');
+                const singleLane = Math.floor(Math.random() * 3);
+                this.createObstacle(singleLane, z, 'normal');
+                // Монеты в свободной полосе
+                this.spawnCoins((singleLane + 1) % 3, z, 'line');
                 break;
                 
             case 'double':
-                // Block 2 lanes
                 const open = Math.floor(Math.random() * 3);
                 for (let i = 0; i < 3; i++) {
                     if (i !== open) this.createObstacle(i, z, 'normal');
                 }
+                // Монеты в проходе
+                this.spawnCoins(open, z, 'line');
                 break;
                 
             case 'low':
-                // Low barrier - need to slide
-                this.createObstacle(Math.floor(Math.random() * 3), z, 'low');
+                const lowLane = Math.floor(Math.random() * 3);
+                this.createObstacle(lowLane, z, 'low');
+                // Монеты в воздухе - прыгай!
+                this.spawnCoins(lowLane, z, 'arc');
                 break;
                 
             case 'tall':
-                // Tall obstacle - must dodge
-                this.createObstacle(Math.floor(Math.random() * 3), z, 'tall');
+                const tallLane = Math.floor(Math.random() * 3);
+                this.createObstacle(tallLane, z, 'tall');
+                // Монеты рядом
+                this.spawnCoins((tallLane + 1) % 3, z, 'line');
                 break;
                 
             case 'corridor':
-                // Walls on sides
                 this.createObstacle(0, z, 'tall');
                 this.createObstacle(2, z, 'tall');
+                // Монеты в центре
+                this.spawnCoins(1, z, 'line');
                 break;
         }
         
         this.lastObstacleZ = z;
+    }
+    
+    spawnCoins(lane, z, type) {
+        const x = CONFIG.LANES[lane];
+        const count = 4;
+        
+        if (type === 'arc') {
+            // Арка в воздухе
+            for (let i = 0; i < count; i++) {
+                const t = i / (count - 1);
+                const y = 2 + Math.sin(t * Math.PI) * 2.5;
+                this.createShard(x, y, z - 2 - i * 2.5);
+            }
+        } else {
+            // Линия
+            for (let i = 0; i < count; i++) {
+                this.createShard(x, 1.5, z - 2 - i * 3);
+            }
+        }
     }
     
     createObstacle(lane, z, type) {
@@ -911,19 +939,12 @@ class Game {
             this.updateParticles(delta * 2);
         }
         
-        // Spawn new objects
+        // Spawn new obstacles (монеты спавнятся вместе с ними)
         const lastObsZ = obstacles.length > 0 
             ? Math.min(...obstacles.map(o => o.position.z)) 
             : 0;
-        if (lastObsZ > CONFIG.SPAWN_Z + 50) {
+        if (lastObsZ > CONFIG.SPAWN_Z + 40) {
             this.spawnObstacle();
-        }
-        
-        const lastShardZ = shards.length > 0 
-            ? Math.min(...shards.map(s => s.position.z)) 
-            : 0;
-        if (lastShardZ > CONFIG.SPAWN_Z + 30) {
-            this.spawnShardLine();
         }
         
         // Collisions
@@ -1162,10 +1183,9 @@ class Game {
         this.setupInput();
         
         // Initial spawns
-        for (let i = 0; i < 3; i++) {
-            this.spawnShardLine();
+        for (let i = 0; i < 5; i++) {
+            this.spawnObstacle();
         }
-        this.spawnObstacle();
         
         this.sound.startMusic();
         this.animate();
@@ -1203,10 +1223,9 @@ class Game {
         this.applyPhaseColor();
         
         // New spawns
-        for (let i = 0; i < 3; i++) {
-            this.spawnShardLine();
+        for (let i = 0; i < 5; i++) {
+            this.spawnObstacle();
         }
-        this.spawnObstacle();
         
         document.getElementById('gameOver').style.display = 'none';
         this.playAnimation('run');
